@@ -124,19 +124,21 @@ export async function sendToPeer(name, text) {
 
 // ---------- AI-to-AI ----------
 
-/** Your own AI, with no tools at all: it only writes the next message, so a friend's reply cannot make it read your files. */
+/** Your own AI, only writing the next message: no tools, no CLAUDE.md / memory / user settings or hooks.
+ *  The account context (e.g. the login e-mail) still reaches it, so every message is shown before it leaves. */
 function runLocal(prompt) {
   const cfg = S.mustConfig();
   const cwd = mkdtempSync(join(tmpdir(), "elefant-relay-duo-"));
-  const env = { ...process.env, ELEFANT_RELAY_TASK: "1" };
+  const env = { ...process.env, ELEFANT_RELAY_TASK: "1", CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1", CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1" };
   let cmd, args, last = null;
   if (cfg.agent === "codex") {
     last = join(cwd, "last.txt");
     cmd = "codex";
-    args = ["exec", "--skip-git-repo-check", "-s", "read-only", ...(A.codexHasRelay() ? ["-c", "mcp_servers.elefant-relay.enabled=false"] : []), "-C", cwd, "--output-last-message", last, "-"];
+    args = ["exec", "--skip-git-repo-check", "--ephemeral", "-s", "read-only", "-c", "project_doc_max_bytes=0", ...(A.codexHasRelay() ? ["-c", "mcp_servers.elefant-relay.enabled=false"] : []), "-C", cwd, "--output-last-message", last, "-"];
   } else {
     cmd = "claude";
-    args = ["-p", "--output-format", "text", "--tools", "", "--strict-mcp-config", "--settings", '{"advisorModel":""}'];
+    args = ["-p", "--output-format", "text", "--tools", "", "--strict-mcp-config", "--setting-sources", "", "--disable-slash-commands", "--no-session-persistence",
+      "--system-prompt", "You write short messages on behalf of a user, to another person's AI. You have no tools. Use only what is in the prompt."];
   }
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
@@ -182,7 +184,6 @@ export function duoApprove(name, ok) {
 
 async function runDuo(p, goal, rounds, st) {
   const me = S.mustIdentity();
-  const cfg = S.mustConfig();
   const secrets = [me.signPriv, me.encPriv];
   const talk = []; // this run's transcript
   add(p.box, { role: "duo-start", text: goal, rounds });
@@ -205,8 +206,8 @@ async function runDuo(p, goal, rounds, st) {
     if (!r.ok) { add(p.box, { role: "note", kind: "failed", text: r.text }); return; }
     const msg = A.redact(r.text, secrets).text;
     if (/^DONE:/i.test(msg)) { add(p.box, { role: "summary", text: msg.replace(/^DONE:\s*/i, "") }); return; }
-    if (cfg.agent === "codex") {
-      // Codex cannot be run without file access, so each message is shown before it leaves
+    {
+      // every message is shown to you before it leaves (your AI may know more about you than the goal needs)
       const ok = await new Promise((resolve) => { st.waiting = { text: msg, resolve }; push(); });
       st.waiting = null;
       if (!ok || st.stop) break;

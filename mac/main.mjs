@@ -178,6 +178,17 @@ app.whenReady().then(() => {
   setInterval(tryListen, 5000); // take over the mailbox when another listener goes away
   createWindow();
   app.on("activate", () => { if (!win) createWindow(); });
+  if (process.env.ELEFANT_RELAY_TEST_DRIVER) {
+    // test hook: a script that drives the window like a person (clicks, typing), then quits
+    win.webContents.once("did-finish-load", async () => {
+      const drive = (await import(new URL(`file://${process.env.ELEFANT_RELAY_TEST_DRIVER}`).href)).default;
+      const shot = async (file) => { const { writeFileSync } = await import("node:fs"); writeFileSync(file, (await win.webContents.capturePage()).toPNG()); };
+      let code = 0;
+      try { await drive({ js: (src) => win.webContents.executeJavaScript(src), shot }); } catch (e) { console.error("DRIVER FAILED:", e); code = 1; }
+      rx?.close(); rx = null;
+      app.exit(code);
+    });
+  }
   if (process.env.ELEFANT_RELAY_SHOT) {
     // test hook: save a screenshot of the window and quit
     setTimeout(async () => {
