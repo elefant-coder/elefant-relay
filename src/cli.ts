@@ -1,16 +1,17 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { userInfo } from "node:os";
+import { homedir, userInfo } from "node:os";
 import { newIdentity } from "./crypto.js";
-import { home } from "./home.js";
+import { home, p } from "./home.js";
 import { createInterface } from "node:readline/promises";
-import { confirmOwnFiles, createInvite, finishInvites, joinInvite, pairedFor, type Paired } from "./pair.js";
+import { confirmOwnFiles, createInvite, finishInvites, joinInvite, pairedFor, parseInvite, type Paired } from "./pair.js";
 import { describeFiles, listFiles, sendFile } from "./files.js";
 import { findSyncthing } from "./syncthing.js";
-import { startReceiver, receiverPid } from "./receiver.js";
+import { startReceiver, receiverPid, listenerInfo, VERSION, type ListenerInfo } from "./receiver.js";
+import { boxId } from "./crypto.js";
 import { removeRule, setRule } from "./rules.js";
 import { ask, describe, waitResult, FINAL } from "./client.js";
 import { startRelay } from "./localRelay.js";
@@ -39,7 +40,7 @@ function parse(argv: string[]): { pos: string[]; flags: Record<string, string | 
   }
   return { pos, flags };
 }
-const BOOL = new Set(["force", "no-register", "write", "always", "never", "no-wait", "help", "own", "people", "files", "no-files", "no-open"]);
+const BOOL = new Set(["force", "no-register", "write", "always", "never", "no-wait", "help", "own", "people", "files", "no-files", "no-open", "no-listen"]);
 const str = (v: string | true | undefined): string | undefined => (typeof v === "string" ? v : undefined);
 const tty = (): boolean => process.stdin.isTTY === true && process.stdout.isTTY === true;
 async function question(q: string): Promise<string> {
@@ -90,16 +91,21 @@ const has = (cmd: string): boolean => spawnSync(process.platform === "win32" ? "
 
 const HELP = `elefant-relay — let your AI ask a friend's AI to do a job, and get just the result back.
 
+Got a code from someone? One line is enough (sets you up, pairs, and starts listening):
+  npx elefant-relay join <CODE@relay>
+
 Set up
   elefant-relay relay deploy               put your own relay on your Cloudflare account (free plan)
   elefant-relay relay local [--port 8787]  or run a relay on your own server
   elefant-relay setup --relay <URL> [--own | --people] [--files] [--name you] [--agent claude|codex|command] [--command "..."] [--no-register]
+                                           --name renames you (keeps your keys) · ELEFANT_RELAY_URL sets a default relay
                                            --own = link your own computers · --people = link with someone else
                                            --files = also send and receive files (needs Syncthing)
 
 Pair
   elefant-relay invite [--own | --people]  show a one-time connection code (10 min) and wait for the other side
-  elefant-relay join <CODE[@relay]>        pair using a connection code
+  elefant-relay join <CODE[@relay]> [--name you] [--no-listen]
+                                           pair using a connection code (sets you up first if needed)
   elefant-relay confirm <peer>             your own computer: after both screens show the same check number,
                                            run its requests without asking and share "My computers"
 
@@ -109,6 +115,8 @@ Files (with Syncthing)
 
 Run
   elefant-relay start                      listen for requests and ask you in this terminal
+                                           (if your AI app already listens, shows its requests here instead)
+  elefant-relay status                     who you are, and whether this computer is listening right now
   elefant-relay ask <peer> "<task>" [--write] [--wait 300]
   elefant-relay result <task-id> [--wait 60]
 
@@ -132,25 +140,168 @@ function openBrowser(url: string): void {
   if (r.error || r.status !== 0) process.stdout.write("Could not open a browser; open the link above.\n");
 }
 
+/**
+ * How the AI app should start us. From a throwaway npx cache folder (`npx elefant-relay setup`) the path
+ * disappears or goes stale on the next upgrade, so register `npx -y elefant-relay@<this version> mcp` instead.
+ */
+function mcpCommand(): string[] {
+  if (/[\\/]_npx[\\/]/.test(cliPath)) return [process.platform === "win32" ? "npx.cmd" : "npx", "-y", `elefant-relay@${VERSION}`, "mcp"];
+  return [process.execPath, cliPath, "mcp"];
+}
+
 function registerMcp(): string[] {
   const done: string[] = [];
+  const cmdLine = mcpCommand();
   const win = process.platform === "win32";
   const q = (args: string[]): string[] => (win ? args.map(winQuote) : args);
   const envArgs = process.env.ELEFANT_RELAY_HOME ? ["-e", `ELEFANT_RELAY_HOME=${process.env.ELEFANT_RELAY_HOME}`] : [];
   if (has("claude")) {
     spawnSync("claude", ["mcp", "remove", "--scope", "user", "elefant-relay"], { stdio: "ignore", shell: process.platform === "win32" });
-    const r = spawnSync("claude", q(["mcp", "add", "--scope", "user", ...envArgs, "elefant-relay", "--", process.execPath, cliPath, "mcp"]),
+    const r = spawnSync("claude", q(["mcp", "add", "--scope", "user", ...envArgs, "elefant-relay", "--", ...cmdLine]),
       { stdio: "ignore", shell: process.platform === "win32" });
     if (r.status === 0) done.push("Claude Code");
   }
   if (has("codex")) {
     spawnSync("codex", ["mcp", "remove", "elefant-relay"], { stdio: "ignore", shell: process.platform === "win32" });
     const cenv = process.env.ELEFANT_RELAY_HOME ? ["--env", `ELEFANT_RELAY_HOME=${process.env.ELEFANT_RELAY_HOME}`] : [];
-    const r = spawnSync("codex", q(["mcp", "add", ...cenv, "elefant-relay", "--", process.execPath, cliPath, "mcp"]),
+    const r = spawnSync("codex", q(["mcp", "add", ...cenv, "elefant-relay", "--", ...cmdLine]),
       { stdio: "ignore", shell: process.platform === "win32" });
     if (r.status === 0) done.push("Codex");
   }
   return done;
+}
+
+
+/** Create or update this computer's setup. Keys are made once; --name only renames, --force makes new keys. */
+async function setup(flags: Record<string, string | true>, relayIn: string | undefined, out: (s: string) => void): Promise<void> {
+  const relay = relayIn;
+  if (!relay) throw new Error("tell me your relay: elefant-relay setup --relay https://elefant-relay.<you>.workers.dev");
+  if (!/^https?:\/\//.test(relay)) throw new Error(`the relay should start with https:// (got "${relay}")`);
+  const agent = (str(flags.agent) ?? loadConfig()?.agent ?? (has("claude") ? "claude" : has("codex") ? "codex" : "command")) as AgentKind;
+  if (!["claude", "codex", "command"].includes(agent)) throw new Error("--agent must be claude, codex, or command");
+  const command = str(flags.command) ?? loadConfig()?.command;
+  if (agent === "command" && !command) throw new Error('agent "command" needs --command "<shell command that reads the request on stdin>"');
+  const prev = loadConfig();
+  let use: Use | undefined = flags.own ? "own" : flags.people ? "people" : prev?.use;
+  if (!use && tty()) {
+    out("What will you connect?\n  1) my own computers (e.g. my Mac mini and my laptop)\n  2) someone else's computer (a friend, a client)");
+    use = (await question("1 or 2 [2]: ")) === "1" ? "own" : "people";
+  }
+  use ??= "people";
+  let files = flags.files ? true : flags["no-files"] ? false : prev?.files;
+  if (files === undefined && tty()) files = /^y(es)?$/i.test(await question("Also send and receive files with Syncthing? [y/N] "));
+  files ??= false;
+  let me = loadIdentity();
+  if (me && flags.force) out(`! --force makes new keys: people you paired with as "${me.name}" must pair with you again`);
+  if (!me || flags.force) {
+    let name = str(flags.name);
+    if (!name && tty()) name = (await question(`Your name, as others will see it [${userInfo().username}]: `)) || undefined;
+    me = newIdentity(cleanName(name ?? userInfo().username));
+    saveIdentity(me);
+  } else if (str(flags.name) && cleanName(str(flags.name)!) !== me.name) {
+    me = { ...me, name: cleanName(str(flags.name)!) };
+    saveIdentity(me);
+    out(`✓ renamed to "${me.name}" (people you already paired with keep the name they saw)`);
+  }
+  const cfg: Config = { ...(prev ?? {}), relay: relay.replace(/\/+$/, ""), agent, ...(command ? { command } : {}), use, files,
+    ...(str(flags["share-dir"]) ? { shareDir: resolve(str(flags["share-dir"])!) } : {}) };
+  saveConfig(cfg);
+  out(`✓ ready as "${me.name}" (keys in ${home()}) · relay ${cfg.relay} · jobs run with ${agent}`);
+  if (prev && prev.relay !== cfg.relay) out(`✓ relay changed from ${prev.relay} — a running listener switches over by itself`);
+  out(use === "own" ? "✓ mode: your own computers (change any time: elefant-relay setup --people)" : "✓ mode: someone else's computer (change any time: elefant-relay setup --own)");
+  if (files) out(findSyncthing() ? "✓ files: Syncthing found — a shared folder is made when you pair" : "! files: Syncthing not found — install it (https://syncthing.net · macOS: brew install syncthing && brew services start syncthing)");
+  if (!flags["no-register"]) {
+    const reg = registerMcp();
+    out(reg.length ? `✓ added elefant-relay to ${reg.join(" and ")} — restart your AI app once to use it there` : "! no Claude Code or Codex found; add the MCP server yourself: elefant-relay mcp");
+  }
+}
+
+const cleanName = (n: string): string => n.trim().replace(/[^\p{L}\p{N}_-]/gu, "").slice(0, 32) || "me";
+
+const ago = (iso: string): number => (Date.now() - Date.parse(iso)) / 1000;
+
+/** One line about the listener on this computer, and what to do if it is wrong. */
+function listenerLine(): string {
+  const pid = receiverPid();
+  if (pid === null) return "not listening — requests wait in the relay until you run `elefant-relay start` or open your AI app";
+  const x = listenerInfo();
+  if (!x) return `an older elefant-relay (pid ${pid}) holds the mailbox and may be stuck on an old setup — restart your AI app, or stop it: kill ${pid}`;
+  const me = loadIdentity();
+  const cfg = loadConfig();
+  const where = x.via === "mcp" ? "your AI app" : x.via === "start" ? "a terminal (elefant-relay start)" : "a short wait for a result";
+  const issues: string[] = [];
+  if (ago(x.beat) > 30) issues.push(`no heartbeat for ${Math.round(ago(x.beat))}s — it may be stuck (kill ${pid})`);
+  if (!x.connected) issues.push(`cannot reach the relay ${x.relay} (offline? wrong address? computer clock off by more than 5 minutes?)`);
+  if (me && x.box !== boxId(me.signPub)) issues.push("it still uses old keys (switches within a second; if not, restart it)");
+  if (cfg && x.relay !== cfg.relay) issues.push(`it still uses the old relay ${x.relay} (switches within a second; if not, restart it)`);
+  if (x.strangers) issues.push(`dropped ${x.strangers} message(s) from computers you are not paired with`);
+  return `listening in ${where} (pid ${pid}, v${x.version})${x.connected ? " · connected" : ""}${issues.length ? `\n  ! ${issues.join("\n  ! ")}` : ""}`;
+}
+
+/**
+ * `start` while another listener runs: show its requests here and let the owner answer them.
+ * The running listener applies the answer (it watches the pending folder).
+ */
+async function attach(x: ListenerInfo | null, pid: number, out: (s: string) => void): Promise<void> {
+  if (!x) {
+    out(`An older elefant-relay (pid ${pid}) is listening and may be stuck on an old setup.`);
+    if (!tty()) { out(`Stop it (kill ${pid}) or restart your AI app, then run elefant-relay start again.`); return; }
+    if (/^n/i.test(await question(`Stop it and listen here instead? [Y/n] `))) return;
+    try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ }
+    for (let i = 0; i < 20 && receiverPid() !== null; i++) await new Promise((r) => setTimeout(r, 250));
+    return listen(out);
+  }
+  out(`👂 already listening in ${x.via === "mcp" ? "your AI app" : "another terminal"} (pid ${pid}). Requests for you show up here too.`);
+  if (!tty()) { out("Answer them with: elefant-relay pending / elefant-relay approve <id>"); return; }
+  out("Ctrl+C to close this window (the listener keeps running).");
+  const asked = new Set<string>();
+  let logSize = existsSync(p("log.jsonl")) ? statSync(p("log.jsonl")).size : 0;
+  for (;;) {
+    for (const r of listPending()) {
+      if (asked.has(r.id)) continue;
+      asked.add(r.id);
+      const preview = r.text.length > 600 ? `${r.text.slice(0, 600)}…` : r.text;
+      out(`\n📨 ${r.peer} asks your AI (${r.mode === "read" ? "read only" : "may write files"}):\n${preview}`);
+      const a = await question(`   [y] once  [a] always allow ${r.peer}/${r.mode}  [n] no  [N] never  > `);
+      const decision = a === "a" ? "always" : a === "y" || a === "" ? "once" : a === "N" ? "deny-always" : "deny";
+      const cur = loadPending(r.id);
+      if (cur && cur.decision === undefined) savePending({ ...cur, decision });
+    }
+    // show what the listener did
+    if (existsSync(p("log.jsonl"))) {
+      const size = statSync(p("log.jsonl")).size;
+      if (size > logSize) {
+        const fresh = readFileSync(p("log.jsonl"), "utf8").slice(logSize);
+        logSize = size;
+        for (const line of fresh.split("\n").filter(Boolean)) {
+          try {
+            const e = JSON.parse(line) as { event?: string; note?: string; reason?: string };
+            if (e.event === "listener" && e.note && !e.note.startsWith("⏳")) out(e.note);
+            else if (e.event === "drop" && e.reason === "unknown sender") out("! dropped a message from a computer you are not paired with");
+          } catch { /* partial line */ }
+        }
+      }
+    }
+    if (receiverPid() !== pid) { out("The other listener stopped — listening here now."); return listen(out); }
+    await new Promise((r) => setTimeout(r, 1000));
+  }
+}
+
+/** Listen in this terminal (or attach to the listener that already runs). */
+async function listen(out: (s: string) => void): Promise<void> {
+  const me = mustIdentity();
+  const cfg = mustConfig();
+  const r = startReceiver({ me, cfg, interactive: true, via: "start", log: (s) => out(s) });
+  if (!r) {
+    const pid = receiverPid();
+    if (pid === null) throw new Error("could not start listening; try again");
+    return attach(listenerInfo(), pid, out);
+  }
+  out(`👂 ${me.name} is listening via ${cfg.relay} — jobs run with ${cfg.agent}. Keep this window open; Ctrl+C to stop.`);
+  const stop = (): void => { r.close(); process.exit(0); };
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
+  await new Promise<never>(() => { /* run until stopped */ });
 }
 
 async function main(): Promise<void> {
@@ -165,34 +316,7 @@ async function main(): Promise<void> {
       return;
     }
     case "setup": {
-      const relay = str(flags.relay) ?? loadConfig()?.relay;
-      if (!relay) throw new Error("tell me your relay: elefant-relay setup --relay https://elefant-relay.<you>.workers.dev");
-      const agent = (str(flags.agent) ?? loadConfig()?.agent ?? (has("claude") ? "claude" : has("codex") ? "codex" : "command")) as AgentKind;
-      if (!["claude", "codex", "command"].includes(agent)) throw new Error("--agent must be claude, codex, or command");
-      const command = str(flags.command) ?? loadConfig()?.command;
-      if (agent === "command" && !command) throw new Error('agent "command" needs --command "<shell command that reads the request on stdin>"');
-      const prev = loadConfig();
-      let use: Use | undefined = flags.own ? "own" : flags.people ? "people" : prev?.use;
-      if (!use && tty()) {
-        out("What will you connect?\n  1) my own computers (e.g. my Mac mini and my laptop)\n  2) someone else's computer (a friend, a client)");
-        use = (await question("1 or 2 [2]: ")) === "1" ? "own" : "people";
-      }
-      use ??= "people";
-      let files = flags.files ? true : flags["no-files"] ? false : prev?.files;
-      if (files === undefined && tty()) files = /^y(es)?$/i.test(await question("Also send and receive files with Syncthing? [y/N] "));
-      files ??= false;
-      let me = loadIdentity();
-      if (!me || flags.force) { me = newIdentity(str(flags.name) ?? userInfo().username); saveIdentity(me); }
-      const cfg: Config = { ...(prev ?? {}), relay: relay.replace(/\/+$/, ""), agent, ...(command ? { command } : {}), use, files,
-        ...(str(flags["share-dir"]) ? { shareDir: resolve(str(flags["share-dir"])!) } : {}) };
-      saveConfig(cfg);
-      out(`✓ ready as "${me.name}" (keys in ${home()}) · relay ${cfg.relay} · jobs run with ${agent}`);
-      out(use === "own" ? "✓ mode: your own computers (change any time: elefant-relay setup --people)" : "✓ mode: someone else's computer (change any time: elefant-relay setup --own)");
-      if (files) out(findSyncthing() ? "✓ files: Syncthing found — a shared folder is made when you pair" : "! files: Syncthing not found — install it (https://syncthing.net · macOS: brew install syncthing && brew services start syncthing)");
-      if (!flags["no-register"]) {
-        const reg = registerMcp();
-        out(reg.length ? `✓ added elefant-relay to ${reg.join(" and ")} — restart your AI session to see it` : "! no Claude Code or Codex found; add the MCP server yourself: elefant-relay mcp");
-      }
+      await setup(flags, str(flags.relay) ?? loadConfig()?.relay ?? process.env.ELEFANT_RELAY_URL, out);
       out("Next: `elefant-relay invite` (or ask your AI to make an invite), then `elefant-relay start`.");
       return;
     }
@@ -216,10 +340,21 @@ async function main(): Promise<void> {
       throw new Error("nobody joined within 10 minutes; make a new invite");
     }
     case "join": {
-      if (!pos[0]) throw new Error("usage: elefant-relay join <CODE[@relay]>");
+      if (!pos[0]) throw new Error("usage: elefant-relay join <CODE@relay>");
+      if (!loadConfig() || !loadIdentity()) {
+        // first time: the code says which relay to use, so set up on the spot
+        const { relay } = parseInvite(pos[0], process.env.ELEFANT_RELAY_URL);
+        await setup(flags, relay, out);
+      }
       const cfg = mustConfig();
       const use = useFlag(flags, cfg);
       await afterPair(await joinInvite(mustIdentity(), cfg, pos[0], use), use, out);
+      if (flags["no-listen"] || !tty()) {
+        out("To receive requests, keep your AI app open or run: npx elefant-relay start");
+        return;
+      }
+      out("");
+      await listen(out);
       return;
     }
     case "confirm": {
@@ -238,14 +373,7 @@ async function main(): Promise<void> {
       return;
     }
     case "start": {
-      const me = mustIdentity();
-      const cfg = mustConfig();
-      const r = startReceiver({ me, cfg, interactive: true, log: (s) => out(s) });
-      if (!r) throw new Error(`already listening (pid ${receiverPid()}). Stop that one first.`);
-      out(`👂 ${me.name} is listening via ${cfg.relay} — jobs run with ${cfg.agent}. Ctrl+C to stop.`);
-      const stop = (): void => { r.close(); process.exit(0); };
-      process.on("SIGINT", stop);
-      process.on("SIGTERM", stop);
+      await listen(out);
       return;
     }
     case "ask": {
@@ -253,7 +381,7 @@ async function main(): Promise<void> {
       if (!peer || words.length === 0) throw new Error('usage: elefant-relay ask <peer> "<task>" [--write] [--wait 300]');
       const wait = Number(str(flags.wait) ?? 300);
       if (receiverPid() === null) {
-        const r = startReceiver({ me: mustIdentity(), cfg: mustConfig(), interactive: false, runJobs: false, log: () => {} });
+        const r = startReceiver({ me: mustIdentity(), cfg: mustConfig(), interactive: false, runJobs: false, via: "ask", log: () => {} });
         const sent = await ask(peer, words.join(" "), flags.write ? "write" : "read");
         const res = await waitResult(sent.taskId, wait);
         r?.close();
@@ -268,10 +396,18 @@ async function main(): Promise<void> {
     }
     case "result": {
       if (!pos[0]) throw new Error("usage: elefant-relay result <task-id> [--wait 0]");
-      out(describe(await waitResult(pos[0], Number(str(flags.wait) ?? 0))));
-      return;
+      const wait = Number(str(flags.wait) ?? 0);
+      // nobody is listening here: listen for a moment so answers waiting in the relay are collected
+      const r = receiverPid() === null
+        ? startReceiver({ me: mustIdentity(), cfg: mustConfig(), interactive: false, runJobs: false, via: "ask", log: () => {} })
+        : null;
+      const res = await waitResult(pos[0], r ? Math.max(wait, 5) : wait);
+      r?.close();
+      out(describe(res));
+      process.exit(0);
     }
     case "peers": {
+      if (loadIdentity() && loadConfig()) for (const x of await finishInvites(mustIdentity(), mustConfig()).catch(() => [])) out(`🤝 paired with ${x.peer.name} just now`);
       const peers = loadPeers();
       out(peers.length ? peers.map((x) => `${x.name}\t${x.kind === "own" ? "my computer" : "person"}\tcheck ${x.safety}\tsince ${x.added.slice(0, 10)}${x.folder ? `\tfiles ${x.folder.path}` : ""}`).join("\n") : "no peers yet");
       return;
@@ -311,7 +447,10 @@ async function main(): Promise<void> {
     case "status": {
       const me = loadIdentity();
       const cfg = loadConfig();
-      out(me && cfg ? `${me.name} · ${cfg.use === "own" ? "own computers" : "with people"}${cfg.files ? " + files" : ""} · relay ${cfg.relay} · agent ${cfg.agent} · ${receiverPid() ? "listening" : "not listening"} · ${loadPeers().length} peer(s) · ${listPending().length} waiting` : "not set up");
+      if (!me || !cfg) { out("not set up — got a code? npx elefant-relay join <CODE@relay>"); return; }
+      out(`${me.name} · ${cfg.use === "own" ? "own computers" : "with people"}${cfg.files ? " + files" : ""} · relay ${cfg.relay} · agent ${cfg.agent} · v${VERSION}`);
+      out(listenerLine());
+      out(`${loadPeers().length} peer(s)${loadPeers().length ? `: ${loadPeers().map((x) => x.name).join(", ")}` : ""} · ${listPending().length} request(s) waiting for your OK`);
       return;
     }
     case "ui": {
@@ -336,7 +475,13 @@ async function main(): Promise<void> {
         if (!existsSync(conf)) throw new Error(`relay files not found at ${conf}`);
         out("Deploying your own relay to your Cloudflare account (free plan is enough)…");
         const r = spawnSync("npx", ["-y", "wrangler@4", "deploy", "--config", conf], { stdio: "inherit", shell: process.platform === "win32" });
-        if (r.status !== 0) throw new Error("wrangler deploy failed (run `npx wrangler login` first)");
+        if (r.status !== 0) {
+          const stray = join(homedir(), ".wrangler");
+          const hint = existsSync(stray) && !existsSync(join(stray, "config"))
+            ? `\nIf you did log in and still see "Not logged in": a ${stray} folder (logs/cache only) can hide your login — move it away and try again.`
+            : "";
+          throw new Error(`wrangler deploy failed (run \`npx wrangler login\` first)${hint}`);
+        }
         out("\nNext: elefant-relay setup --relay https://elefant-relay.<your-subdomain>.workers.dev  (the URL printed above)");
         return;
       }

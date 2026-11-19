@@ -43,6 +43,7 @@ export function connectBox(
   relay: string, me: Identity,
   onEnvelope: (env: Envelope) => Promise<boolean | void>,
   log: (s: string) => void = () => {},
+  onState: (connected: boolean) => void = () => {},
 ): BoxConnection {
   let closed = false;
   let ws: WebSocket | null = null;
@@ -53,10 +54,17 @@ export function connectBox(
     if (closed) return;
     const a = boxAuth(me);
     const url = `${base(relay).replace(/^http/, "ws")}/box/${a.box}?pub=${a.pub}&ts=${a.ts}&sig=${a.sig}`;
-    ws = new WebSocket(url);
+    try { ws = new WebSocket(url); } catch (e) {
+      onState(false);
+      log(`bad relay address ${relay}: ${e instanceof Error ? e.message : String(e)}`);
+      setTimeout(open, delay);
+      delay = Math.min(delay * 2, 30_000);
+      return;
+    }
     ws.addEventListener("open", () => {
       delay = 1000;
       log("connected to relay");
+      onState(true);
       ping = setInterval(() => ws?.readyState === WebSocket.OPEN && ws.send("ping"), 30_000);
     });
     ws.addEventListener("message", (ev) => {
@@ -73,6 +81,7 @@ export function connectBox(
     ws.addEventListener("close", () => {
       if (ping) clearInterval(ping);
       if (closed) return;
+      onState(false);
       log(`relay connection lost, retrying in ${Math.round(delay / 1000)}s`);
       setTimeout(open, delay);
       delay = Math.min(delay * 2, 30_000);

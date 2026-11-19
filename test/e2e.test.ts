@@ -75,7 +75,7 @@ test("pairing with a code: both sides see each other and the same check number",
 
 test("first request waits for OK; 'always' means the next one runs without asking", async () => {
   const first = run(A, "ask", "bob", "hello there", "--wait", "3");
-  assert.match(first.out, /Waiting for bob to approve/);
+  assert.match(first.out, /waiting for bob's OK/);
   await until(() => run(B, "pending").out.includes("hello there"));
   const id = run(B, "pending").out.split(/\s+/)[0]!;
   assert.equal(run(B, "approve", id, "--always").code, 0);
@@ -90,7 +90,7 @@ test("first request waits for OK; 'always' means the next one runs without askin
 
 test("a different mode (write) is asked again; 'never' blocks it from then on", async () => {
   const w = run(A, "ask", "bob", "MAKE_FILE please", "--write", "--wait", "3");
-  assert.match(w.out, /Waiting for bob/);
+  assert.match(w.out, /waiting for bob's OK/);
   await until(() => run(B, "pending").out.includes("MAKE_FILE"));
   const id = run(B, "pending").out.split(/\s+/)[0]!;
   run(B, "deny", id, "--never");
@@ -111,7 +111,7 @@ test("write jobs run inside the work folder once allowed", async () => {
 test("expired rules stop applying", async () => {
   assert.equal(run(B, "allow", "alice", "--mode", "read", "--until", "2000-01-01").code, 0);
   const r = run(A, "ask", "bob", "after expiry", "--wait", "3");
-  assert.match(r.out, /Waiting for bob/);
+  assert.match(r.out, /waiting for bob's OK/);
   await until(() => run(B, "pending").out.includes("after expiry"));
   run(B, "approve", run(B, "pending").out.split(/\s+/)[0]!);
 });

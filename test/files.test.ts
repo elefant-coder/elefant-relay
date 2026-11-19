@@ -184,7 +184,7 @@ test("files: own computers — 'My computers' is shared only after the check num
   assert.match(invOut, /Code for your other computer/);
 
   // B answers "y" at the keyboard after comparing the check number
-  const j = runTty(B, stB, [["[y/N]", "y"]], "join", code);
+  const j = runTty(B, stB, [["[y/N]", "y"]], "join", code, "--no-listen");
   assert.equal(j.code, 0, j.out);
   assert.match(j.out, /Does the other screen show \d{6}/);
   assert.match(j.out, /can run requests here without asking/);

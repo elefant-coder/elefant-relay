@@ -34,7 +34,7 @@ No Cloudflare? `npx elefant-relay relay local --port 8787` runs the same relay o
 npx elefant-relay setup --relay https://elefant-relay.<you>.workers.dev
 ```
 
-**3. Pair.** Alice runs `npx elefant-relay invite` and sends Bob the code. Bob runs:
+**3. Pair.** Alice runs `npx elefant-relay invite` and sends Bob the code. Bob needs only one line — it sets him up (name, relay, MCP), pairs, and starts listening:
 
 ```sh
 npx elefant-relay join K7Q-M2X@elefant-relay.you.workers.dev
@@ -42,9 +42,13 @@ npx elefant-relay join K7Q-M2X@elefant-relay.you.workers.dev
 
 Both see the same 6-digit check number. (Or just ask your AI: *"make an elefant-relay invite"*.)
 
-**4. Listen and ask.** Keep `npx elefant-relay start` running to answer requests in the terminal. Then, in your AI:
+**4. Ask.** In your AI:
 
 > Ask bob's AI to summarize what changed in their API docs this week.
+
+Requests are picked up while the other side has their AI app open (it listens in the background) or runs `npx elefant-relay start`. If the AI app is already listening, `start` shows its requests in the terminal so you can answer them there.
+
+**Something not arriving?** `npx elefant-relay status` says who you are, which relay you use, and whether this computer is listening right now — and if not, why (old version holding the mailbox, cannot reach the relay, clock off). The sender sees how far a request got: *not picked up yet* → *waiting for OK* → *working* → result.
 
 ## Your own computers, and files
 
@@ -113,6 +117,8 @@ Opens a read-only page in your browser: who is connected, what each person or co
   "timeoutSec": 600
 }
 ```
+
+`ELEFANT_RELAY_URL` sets the relay `setup` uses when you pass none (handy for a team that shares one relay). `setup --name` renames you without new keys; `setup --force` makes new keys (people must pair again). A running listener follows changes to the relay or keys by itself.
 
 `agent` can be `claude`, `codex`, or `command` (any program that reads the request on stdin and prints the answer).
 

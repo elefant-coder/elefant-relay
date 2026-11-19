@@ -1,6 +1,6 @@
 {
   "name": "elefant-relay",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Let your AI ask a friend's AI to do a job — and get just the result back. End-to-end encrypted, outbound-only, works with any MCP client.",
   "keywords": [
     "mcp",

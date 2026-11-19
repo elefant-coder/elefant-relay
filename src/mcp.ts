@@ -4,8 +4,9 @@ import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { ask, waitResult, describe, receiverRunning } from "./client.js";
-import { createInvite, joinInvite } from "./pair.js";
-import { startReceiver } from "./receiver.js";
+import { createInvite, finishInvites, joinInvite } from "./pair.js";
+import { startReceiver, VERSION } from "./receiver.js";
+import { appendLog } from "./home.js";
 import { removeRule, setRule } from "./rules.js";
 import { describeFiles, listFiles, sendFile } from "./files.js";
 import {
@@ -23,27 +24,44 @@ export async function runMcp(): Promise<void> {
   // F6: a job that someone else asked us to do gets no elefant-relay tools at all —
   // it cannot approve, change rules, or forward the request to a third person.
   if (process.env.ELEFANT_RELAY_TASK === "1") {
-    const bare = new Server({ name: "elefant-relay", version: "0.1.0" }, { capabilities: { tools: {} } });
+    const bare = new Server({ name: "elefant-relay", version: VERSION }, { capabilities: { tools: {} } });
     bare.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [] }));
     await bare.connect(new StdioServerTransport());
     return;
   }
-  const server = new McpServer({ name: "elefant-relay", version: "0.1.0" });
+  const server = new McpServer({ name: "elefant-relay", version: VERSION });
   register(server);
 
   // Keep a receiver alive while the AI session is open, unless `elefant-relay start` already runs.
   const me = loadIdentity();
   const cfg = loadConfig();
-  if (me && cfg) startReceiver({ me, cfg, interactive: false, log: () => {} });
+  const rx = me && cfg ? startReceiver({ me, cfg, interactive: false, via: "mcp", log: (s) => { if (!/^(connected to relay|relay connection lost)/.test(s)) appendLog({ event: "listener", note: s }); } }) : null;
 
-  await server.connect(new StdioServerTransport());
+  // When the AI app goes away (or only probed us, like `claude mcp list`), stop listening and exit,
+  // so no orphan keeps the mailbox with an old setup.
+  let gone = false;
+  const bye = (): void => { if (gone) return; gone = true; rx?.close(); process.exit(0); };
+  const transport = new StdioServerTransport();
+  transport.onclose = bye;
+  process.stdin.on("end", bye);
+  process.stdin.on("close", bye);
+  process.on("SIGTERM", bye);
+  process.on("SIGINT", bye);
+  process.on("SIGHUP", bye);
+  // the app died without closing our stdin: we were handed to init
+  const parent = process.ppid;
+  setInterval(() => { if (process.ppid !== parent) bye(); }, 2000).unref();
+  await server.connect(transport);
 }
 
 function register(server: McpServer): void {
   server.registerTool("relay_peers", {
     description: "List the people (peers) whose AI you can ask for help through elefant-relay.",
     inputSchema: {},
-  }, safe(() => {
+  }, safe(async () => {
+    const me = loadIdentity();
+    const cfg = loadConfig();
+    if (me && cfg) await finishInvites(me, cfg).catch(() => []);
     const peers = loadPeers();
     if (peers.length === 0) return "No peers yet. Use relay_invite to make an invite code, or relay_join with a code you received.";
     return peers.map((x) => `- ${x.name} (${x.kind === "own" ? "the user's own computer" : "another person"}, check number ${x.safety}${x.folder ? `, shared folder ${x.folder.path}` : ""})`).join("\n");

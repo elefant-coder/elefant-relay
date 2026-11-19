@@ -5,10 +5,11 @@ import { connectBox, sendEnvelope, type BoxConnection } from "./relayClient.js";
 import { finishInvites } from "./pair.js";
 import { decide, setRule } from "./rules.js";
 import { runAgent, redact } from "./agent.js";
-import { appendLog, ensureDir, p, readJson } from "./home.js";
+import { appendLog, ensureDir, p, readJson, writeJson } from "./home.js";
+import { boxId } from "./crypto.js";
 import {
-  listPending, loadConfig, loadInstructions, loadPeers, loadPending, loadResult, newId, removePending, savePending, saveResult,
-  seenBefore, pendingFile, type Config, type Mode, type Payload, type Peer, type Pending,
+  listPending, loadConfig, loadIdentity, loadInstructions, loadPeers, loadPending, loadResult, newId, removePending, savePending, saveResult,
+  seenBefore, pendingFile, type Config, type Mode, type Payload, type Peer, type Pending, type ResultRecord,
 } from "./state.js";
 
 const ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -23,6 +24,33 @@ export function receiverPid(): number | null {
   if (!existsSync(lockFile())) return null;
   const pid = Number(readFileSync(lockFile(), "utf8").trim());
   return Number.isInteger(pid) && pid > 0 && alive(pid) ? pid : null;
+}
+
+/** What the running listener writes about itself, so `status` and `start` can tell what it is doing. */
+export interface ListenerInfo {
+  pid: number;
+  /** "start" = a terminal, "mcp" = an AI session, "ask" = a short wait for a result */
+  via: "start" | "mcp" | "ask";
+  version: string;
+  name: string;
+  box: string;
+  relay: string;
+  connected: boolean;
+  since: string;
+  /** last heartbeat (ISO); older than ~30 s means the process is stuck */
+  beat: string;
+  /** messages from computers we are not paired with (dropped) */
+  strangers: number;
+}
+export const VERSION = "0.2.0";
+const infoFile = (): string => p("listener.json");
+
+/** The running listener's own report, or null (no listener, or an older version that does not write one). */
+export function listenerInfo(): ListenerInfo | null {
+  const pid = receiverPid();
+  if (pid === null) return null;
+  const x = readJson<ListenerInfo | null>(infoFile(), null);
+  return x && x.pid === pid ? x : null;
 }
 
 /** Exclusive lock: create the pid file with "wx"; clear it only if its owner is dead. */
@@ -57,12 +85,16 @@ export interface ReceiverOptions {
   me: Identity;
   cfg: Config;
   interactive: boolean;
+  via?: ListenerInfo["via"];
   /** false = only collect results and invites; leave incoming tasks in the mailbox for a full receiver */
   runJobs?: boolean;
   log?: (s: string) => void;
 }
 
 export interface Receiver { close(): void }
+
+/** A late or repeated status must never move a task backwards. */
+const RANK: Record<ResultRecord["status"], number> = { sent: 0, "waiting-approval": 1, working: 2, completed: 3, failed: 3, rejected: 3 };
 
 /**
  * Listen on our mailbox: run or queue incoming tasks, store incoming results,
@@ -72,6 +104,18 @@ export interface Receiver { close(): void }
 export function startReceiver(o: ReceiverOptions): Receiver | null {
   if (!takeLock()) return null;
   const log = o.log ?? ((s: string) => process.stderr.write(`${s}\n`));
+  // The setup can change while we run (setup again, a new relay, new keys): follow it instead of
+  // listening on the old mailbox forever. Peers are read fresh for every message.
+  let me = o.me;
+  let cfg = o.cfg;
+  const info: ListenerInfo = {
+    pid: process.pid, via: o.via ?? (o.interactive ? "start" : "mcp"), version: VERSION, name: me.name, box: boxId(me.signPub),
+    relay: cfg.relay, connected: false, since: new Date().toISOString(), beat: new Date().toISOString(), strangers: 0,
+  };
+  const writeInfo = (): void => { info.beat = new Date().toISOString(); try { writeJson(infoFile(), info); } catch { /* best effort */ } };
+  writeInfo();
+  /** peer count when we first held a stranger's message (-1 = none held) */
+  let held = -1;
   let queue: Promise<void> = Promise.resolve();
   const enqueue = (job: () => Promise<void>): void => { queue = queue.then(job, job); };
   let rl: Interface | null = null;
@@ -81,18 +125,18 @@ export function startReceiver(o: ReceiverOptions): Receiver | null {
 
   const peerByBox = (box: string): Peer | undefined => loadPeers().find((x) => x.box === box);
   const reply = (peer: Peer, payload: Payload): Promise<void> =>
-    sendTo(o.me, peer, payload).catch((e: unknown) => log(`could not reply to ${peer.name}: ${e instanceof Error ? e.message : String(e)}`));
+    sendTo(me, peer, payload).catch((e: unknown) => log(`could not reply to ${peer.name}: ${e instanceof Error ? e.message : String(e)}`));
 
   const runJob = (peer: Peer, taskId: string, mode: Mode, text: string, how: string): void => {
     enqueue(async () => {
       log(`▶ working on ${peer.name}'s request (${mode}, ${how})`);
       await reply(peer, { type: "status", taskId, state: "working" });
-      const r = await runAgent(o.cfg, o.me.name, peer.name, mode, text, loadInstructions())
+      const r = await runAgent(cfg, me.name, peer.name, mode, text, loadInstructions())
         .catch((e: unknown) => ({ ok: false, text: e instanceof Error ? e.message : String(e) }));
-      const clean = redact(r.text, [o.me.signPriv, o.me.encPriv]);
+      const clean = redact(r.text, [me.signPriv, me.encPriv]);
       const status = r.ok ? "completed" : "failed";
       try {
-        await sendTo(o.me, peer, { type: "result", taskId, status, text: capBytes(clean.text, MAX_RESULT_BYTES) });
+        await sendTo(me, peer, { type: "result", taskId, status, text: capBytes(clean.text, MAX_RESULT_BYTES) });
       } catch (e) {
         log(`could not send the result to ${peer.name}: ${e instanceof Error ? e.message : String(e)}`);
         await reply(peer, { type: "result", taskId, status: "failed", text: "The result could not be delivered (too large or relay error)." });
@@ -112,7 +156,7 @@ export function startReceiver(o: ReceiverOptions): Receiver | null {
     appendLog({ event: "decision", peer: peer.name, task: x.id, mode: x.mode, decision: x.decision });
     if (x.decision === "once" || x.decision === "always") runJob(peer, x.taskId, x.mode, x.text, x.decision);
     else {
-      void reply(peer, { type: "result", taskId: x.taskId, status: "rejected", text: `${o.me.name} declined this request.` });
+      void reply(peer, { type: "result", taskId: x.taskId, status: "rejected", text: `${me.name} declined this request.` });
       log(`✗ declined ${peer.name}'s request`);
     }
   };
@@ -148,7 +192,7 @@ export function startReceiver(o: ReceiverOptions): Receiver | null {
     appendLog({ event: "task", peer: peer.name, task: t.id, mode: t.mode, decision: d.action, rule: d.rule?.id });
     if (d.action === "allow") { runJob(peer, t.id, t.mode, text, `rule ${d.rule?.id}`); return; }
     if (d.action === "deny") {
-      void reply(peer, { type: "result", taskId: t.id, status: "rejected", text: `${o.me.name}'s rules decline this request.` });
+      void reply(peer, { type: "result", taskId: t.id, status: "rejected", text: `${me.name}'s rules decline this request.` });
       log(`✗ declined ${peer.name}'s request by rule`);
       return;
     }
@@ -163,7 +207,8 @@ export function startReceiver(o: ReceiverOptions): Receiver | null {
     if (payload.type !== "result" && payload.type !== "status") return;
     const mine = loadResult(payload.taskId);
     if (!mine || mine.peer !== peer.name) return; // only for tasks we sent to this peer
-    if (["completed", "failed", "rejected"].includes(mine.status)) return;
+    const next = payload.type === "status" ? payload.state : payload.status;
+    if (RANK[next] === undefined || RANK[next] <= RANK[mine.status]) return;
     if (payload.type === "status") saveResult({ ...mine, status: payload.state, updated: new Date().toISOString() });
     else {
       saveResult({ ...mine, status: payload.status, text: payload.text, updated: new Date().toISOString() });
@@ -173,9 +218,17 @@ export function startReceiver(o: ReceiverOptions): Receiver | null {
 
   const onEnvelope = async (env: Envelope): Promise<boolean> => {
     const peer = peerByBox(env.h?.from ?? "");
-    if (!peer) { appendLog({ event: "drop", reason: "unknown sender" }); return true; }
+    if (!peer) {
+      // Right after pairing the other side may write before we have saved them: while an invite of ours
+      // is open, leave the message in the mailbox (it is delivered again once the pairing is saved).
+      if (openInvites()) { if (held < 0) held = loadPeers().length; return false; }
+      info.strangers++;
+      writeInfo();
+      appendLog({ event: "drop", reason: "unknown sender" });
+      return true;
+    }
     let payload: Payload;
-    try { payload = open(o.me, peer.signPub, env) as Payload; } catch (e) {
+    try { payload = open(me, peer.signPub, env) as Payload; } catch (e) {
       appendLog({ event: "drop", peer: peer.name, reason: e instanceof OpenError ? e.message : "error" });
       return true;
     }
@@ -186,16 +239,42 @@ export function startReceiver(o: ReceiverOptions): Receiver | null {
     return true;
   };
 
-  const conn: BoxConnection = connectBox(o.cfg.relay, o.me, onEnvelope, log);
+  const onState = (up: boolean): void => { info.connected = up; writeInfo(); };
+  let conn: BoxConnection = connectBox(cfg.relay, me, onEnvelope, log, onState);
+  const reconnect = (why: string): void => {
+    conn.close();
+    info.connected = false;
+    info.name = me.name; info.box = boxId(me.signPub); info.relay = cfg.relay;
+    writeInfo();
+    if (why) log(why);
+    conn = connectBox(cfg.relay, me, onEnvelope, log, onState);
+  };
+  let beat = 0;
   if (o.interactive && process.stdin.isTTY) rl = createInterface({ input: process.stdin, output: process.stdout });
 
   // pick up approvals from the CLI or the AI, and invites answered by the other side
   const tick = setInterval(() => {
+    try {
+      const m2 = loadIdentity();
+      const c2 = loadConfig();
+      if (m2 && c2) {
+        const moved = m2.signPub !== me.signPub || c2.relay !== cfg.relay;
+        me = m2;
+        cfg = c2;
+        if (moved) reconnect(`setup changed — now listening as ${me.name} via ${cfg.relay}`);
+        else if (info.name !== me.name) { info.name = me.name; writeInfo(); }
+      }
+    } catch { /* a half-written file: try again next tick */ }
+    if (++beat % 5 === 0) writeInfo();
+    // a held message: deliver it again once someone new is paired (or once no invite is open, so it gets dropped)
+    if (held >= 0 && (loadPeers().length !== held || !openInvites())) { held = -1; reconnect(""); }
     for (const x of listPendingDecided()) applyDecision(x);
     if (rl) for (const x of listPending()) if (!asked.has(x.id)) { asked.add(x.id); promptQueue.push(x); askNext(); }
     if (readJson<unknown[]>(p("invites.json"), []).length > 0) {
-      finishInvites(o.me, loadConfig() ?? o.cfg).then((added) => {
+      finishInvites(me, loadConfig() ?? cfg).then((added) => {
         for (const x of added) log(`🤝 paired with ${x.peer.name} — check number ${x.peer.safety}${x.note ? `\n${x.note}` : ""}`);
+        // pick up anything the new peer sent before we had saved them
+        if (added.length) reconnect("");
       }).catch(() => { /* retry next tick */ });
     }
   }, 1000);
@@ -205,9 +284,17 @@ export function startReceiver(o: ReceiverOptions): Receiver | null {
       clearInterval(tick);
       conn.close();
       rl?.close();
-      if (receiverPid() === process.pid) unlinkSync(lockFile());
+      if (receiverPid() === process.pid) {
+        try { unlinkSync(infoFile()); } catch { /* already gone */ }
+        unlinkSync(lockFile());
+      }
     },
   };
+}
+
+/** One of our invites is still open (not answered, not expired). */
+function openInvites(): boolean {
+  return readJson<{ created: number }[]>(p("invites.json"), []).some((i) => Date.now() - i.created < 600_000);
 }
 
 function listPendingDecided(): Pending[] {
