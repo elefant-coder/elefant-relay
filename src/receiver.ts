@@ -29,8 +29,8 @@ export function receiverPid(): number | null {
 /** What the running listener writes about itself, so `status` and `start` can tell what it is doing. */
 export interface ListenerInfo {
   pid: number;
-  /** "start" = a terminal, "mcp" = an AI session, "ask" = a short wait for a result */
-  via: "start" | "mcp" | "ask";
+  /** "start" = a terminal, "mcp" = an AI session, "app" = the Mac app, "ask" = a short wait for a result */
+  via: "start" | "mcp" | "app" | "ask";
   version: string;
   name: string;
   box: string;

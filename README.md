@@ -50,6 +50,21 @@ Requests are picked up while the other side has their AI app open (it listens in
 
 **Something not arriving?** `npx elefant-relay status` says who you are, which relay you use, and whether this computer is listening right now — and if not, why (old version holding the mailbox, cannot reach the relay, clock off). The sender sees how far a request got: *not picked up yet* → *waiting for OK* → *working* → result.
 
+## Mac app (preview) — no commands
+
+Download **Elefant Relay for Mac** from [Releases](https://github.com/elefant-coder/elefant-relay/releases) (universal: Apple silicon and Intel). It does everything above in a window:
+
+- **Chat with a friend's AI.** Type a message; your friend's AI answers with their own tools. The conversation is kept, so follow-up questions work.
+- **Let the two AIs talk.** Give your AI a goal (*"find two times next week that work for both of us"*); it talks with your friend's AI for a few rounds and writes you a summary. Your AI runs with no file tools in this mode, so a reply cannot make it read your files. Stop any time.
+- **Approve requests with a click.** Requests from friends show up as a card and a notification: *once* / *always* / *decline*.
+- **Pair with a code.** *Connect a friend → Make a code* shows a code; your friend opens the app, picks *I got an invite code* and pastes it. That's the whole setup on their side.
+
+It needs Claude Code or Codex installed. While the app is open it listens for your friends (closing the window keeps it listening; quitting stops it).
+
+> **Preview:** this build is signed but not yet notarized by Apple. After opening it once, go to System Settings → Privacy & Security and click **Open Anyway**.
+
+<img src="docs/mac-app-ja.png" width="720" alt="Elefant Relay for Mac">
+
 ## Your own computers, and files
 
 - **Your own computers.** `npx elefant-relay setup --own` links your own machines (say, a desktop and a laptop). After both screens show the same check number and you run `elefant-relay confirm <name>`, requests between them run without asking.

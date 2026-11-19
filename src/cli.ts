@@ -238,7 +238,7 @@ function listenerLine(): string {
   if (!x) return `an older elefant-relay (pid ${pid}) holds the mailbox and may be stuck on an old setup — restart your AI app, or stop it: kill ${pid}`;
   const me = loadIdentity();
   const cfg = loadConfig();
-  const where = x.via === "mcp" ? "your AI app" : x.via === "start" ? "a terminal (elefant-relay start)" : "a short wait for a result";
+  const where = x.via === "mcp" ? "your AI app" : x.via === "app" ? "the Elefant Relay app" : x.via === "start" ? "a terminal (elefant-relay start)" : "a short wait for a result";
   const issues: string[] = [];
   if (ago(x.beat) > 30) issues.push(`no heartbeat for ${Math.round(ago(x.beat))}s — it may be stuck (kill ${pid})`);
   if (!x.connected) issues.push(`cannot reach the relay ${x.relay} (offline? wrong address? computer clock off by more than 5 minutes?)`);
@@ -267,7 +267,7 @@ async function attach(x: ListenerInfo | null, pid: number, out: (s: string) => v
     for (let i = 0; i < 20 && receiverPid() !== null; i++) await new Promise((r) => setTimeout(r, 250));
     return listen(out);
   }
-  out(`👂 already listening in ${x.via === "mcp" ? "your AI app" : "another terminal"} (pid ${pid}). Requests for you show up here too.`);
+  out(`👂 already listening in ${x.via === "mcp" ? "your AI app" : x.via === "app" ? "the Elefant Relay app" : "another terminal"} (pid ${pid}). Requests for you show up here too.`);
   if (!tty()) { out("Answer them with: elefant-relay pending / elefant-relay approve <id>"); return; }
   out("Ctrl+C to close this window (the listener keeps running).");
   const asked = new Set<string>();

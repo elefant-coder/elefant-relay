@@ -1,0 +1,57 @@
+{
+  "name": "elefant-relay-app",
+  "productName": "Elefant Relay",
+  "version": "0.2.0",
+  "description": "Talk with a friend's AI from your Mac — no commands.",
+  "author": "Elefant Inc.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "lib": "rm -rf lib && cp -R ../dist/src lib && cp ../package.json lib/relay-package.json",
+    "start": "npm run lib && electron .",
+    "dist": "npm run lib && electron-builder --mac dmg --universal"
+  },
+  "build": {
+    "appId": "com.elefant.relay",
+    "productName": "Elefant Relay",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.mjs",
+      "preload.cjs",
+      "chat.mjs",
+      "renderer/**",
+      "lib/**",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "icon": "build/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        }
+      ]
+    },
+    "dmg": {
+      "sign": true,
+      "title": "Elefant Relay"
+    }
+  },
+  "devDependencies": {
+    "electron": "^45.4.1",
+    "electron-builder": "^26.18.0"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^2.4.0"
+  }
+}

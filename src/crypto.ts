@@ -1,6 +1,7 @@
+import { aeadOpen, aeadSeal } from "./aead.js";
 import {
   generateKeyPairSync, createPrivateKey, createPublicKey, sign, verify, diffieHellman,
-  hkdfSync, randomBytes, createCipheriv, createDecipheriv, createHash, scryptSync, KeyObject,
+  hkdfSync, randomBytes, createHash, scryptSync, KeyObject,
 } from "node:crypto";
 
 export const b64u = (b: Uint8Array): string => Buffer.from(b).toString("base64url");
@@ -94,9 +95,7 @@ export function seal(sender: Identity, toEncPub: string, toBox: string, payload:
   const now = Math.floor(Date.now() / 1000);
   const h: Header = { v: 1, id: b64u(randomBytes(16)), from: boxId(sender.signPub), to: toBox, ts: now, exp: now + ttlSec };
   const n = randomBytes(12);
-  const c = createCipheriv("chacha20-poly1305", key, n, { authTagLength: 16 });
-  c.setAAD(canon(h));
-  const ct = Buffer.concat([c.update(Buffer.from(JSON.stringify(payload))), c.final(), c.getAuthTag()]);
+  const ct = aeadSeal(key, n, Buffer.from(JSON.stringify(payload)), canon(h));
   const body = { h, epk: b64u(epk), n: b64u(n), ct: b64u(ct) };
   return { ...body, sig: signBytes(sender, sigInput(body)) };
 }
@@ -115,12 +114,8 @@ export function open(me: Identity, senderSignPub: string, e: Envelope): unknown 
   if (e.h.ts > now + 300) throw new OpenError("from the future");
   const shared = diffieHellman({ privateKey: priv(me.encPriv), publicKey: xPubKey(e.epk) });
   const key = aeadKey(shared, unb64u(e.epk), unb64u(me.encPub));
-  const raw = unb64u(e.ct);
-  const d = createDecipheriv("chacha20-poly1305", key, unb64u(e.n), { authTagLength: 16 });
-  d.setAAD(canon(e.h));
-  d.setAuthTag(raw.subarray(raw.length - 16));
   try {
-    const pt = Buffer.concat([d.update(raw.subarray(0, raw.length - 16)), d.final()]);
+    const pt = aeadOpen(key, unb64u(e.n), unb64u(e.ct), canon(e.h));
     return JSON.parse(pt.toString("utf8"));
   } catch {
     throw new OpenError("decrypt failed");
@@ -151,18 +146,13 @@ function pairKey(code: string): Buffer {
 
 export function pairSeal(code: string, obj: unknown): string {
   const n = randomBytes(12);
-  const c = createCipheriv("chacha20-poly1305", pairKey(code), n, { authTagLength: 16 });
-  const ct = Buffer.concat([c.update(Buffer.from(JSON.stringify(obj))), c.final(), c.getAuthTag()]);
+  const ct = aeadSeal(pairKey(code), n, Buffer.from(JSON.stringify(obj)));
   return b64u(Buffer.concat([n, ct]));
 }
 
 export function pairOpen(code: string, blob: string): unknown {
   const raw = unb64u(blob);
-  const n = raw.subarray(0, 12);
-  const ct = raw.subarray(12, raw.length - 16);
-  const d = createDecipheriv("chacha20-poly1305", pairKey(code), n, { authTagLength: 16 });
-  d.setAuthTag(raw.subarray(raw.length - 16));
-  return JSON.parse(Buffer.concat([d.update(ct), d.final()]).toString("utf8"));
+  return JSON.parse(aeadOpen(pairKey(code), raw.subarray(0, 12), raw.subarray(12)).toString("utf8"));
 }
 
 /** 6-digit safety number both sides can compare. */
