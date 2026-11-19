@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync, unlinkSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir, userInfo } from "node:os";
@@ -140,18 +140,9 @@ function openBrowser(url: string): void {
   if (r.error || r.status !== 0) process.stdout.write("Could not open a browser; open the link above.\n");
 }
 
-/**
- * How the AI app should start us. From a throwaway npx cache folder (`npx elefant-relay setup`) the path
- * disappears or goes stale on the next upgrade, so register `npx -y elefant-relay@<this version> mcp` instead.
- */
-function mcpCommand(): string[] {
-  if (/[\\/]_npx[\\/]/.test(cliPath)) return [process.platform === "win32" ? "npx.cmd" : "npx", "-y", `elefant-relay@${VERSION}`, "mcp"];
-  return [process.execPath, cliPath, "mcp"];
-}
-
 function registerMcp(): string[] {
   const done: string[] = [];
-  const cmdLine = mcpCommand();
+  const cmdLine = [process.execPath, cliPath, "mcp"];
   const win = process.platform === "win32";
   const q = (args: string[]): string[] => (win ? args.map(winQuote) : args);
   const envArgs = process.env.ELEFANT_RELAY_HOME ? ["-e", `ELEFANT_RELAY_HOME=${process.env.ELEFANT_RELAY_HOME}`] : [];
@@ -212,8 +203,27 @@ async function setup(flags: Record<string, string | true>, relayIn: string | und
   if (files) out(findSyncthing() ? "✓ files: Syncthing found — a shared folder is made when you pair" : "! files: Syncthing not found — install it (https://syncthing.net · macOS: brew install syncthing && brew services start syncthing)");
   if (!flags["no-register"]) {
     const reg = registerMcp();
+    saveConfig({ ...cfg, mcp: reg.length ? { version: VERSION, path: cliPath } : "off" });
     out(reg.length ? `✓ added elefant-relay to ${reg.join(" and ")} — restart your AI app once to use it there` : "! no Claude Code or Codex found; add the MCP server yourself: elefant-relay mcp");
-  }
+  } else saveConfig({ ...cfg, mcp: "off" });
+}
+
+/**
+ * After an upgrade the AI apps still start the old copy (registered by path), and its listener takes the
+ * mailbox. Point them at this copy again.
+ */
+function refreshMcp(out: (s: string) => void): void {
+  const cfg = loadConfig();
+  if (!cfg || cfg.mcp === "off") return;
+  if (cfg.mcp && cfg.mcp.version === VERSION && cfg.mcp.path === cliPath) return;
+  // no record (made by 0.1.0): only the normal home was registered by setup; a custom home may be a test or a
+  // second identity that was set up with --no-register
+  if (!cfg.mcp && process.env.ELEFANT_RELAY_HOME) return;
+  if (!has("claude") && !has("codex")) return;
+  const reg = registerMcp();
+  if (!reg.length) return;
+  saveConfig({ ...cfg, mcp: { version: VERSION, path: cliPath } });
+  out(`✓ ${reg.join(" and ")} now start elefant-relay v${VERSION} — restart your AI app once so it uses it`);
 }
 
 const cleanName = (n: string): string => n.trim().replace(/[^\p{L}\p{N}_-]/gu, "").slice(0, 32) || "me";
@@ -244,9 +254,15 @@ function listenerLine(): string {
  */
 async function attach(x: ListenerInfo | null, pid: number, out: (s: string) => void): Promise<void> {
   if (!x) {
-    out(`An older elefant-relay (pid ${pid}) is listening and may be stuck on an old setup.`);
-    if (!tty()) { out(`Stop it (kill ${pid}) or restart your AI app, then run elefant-relay start again.`); return; }
-    if (/^n/i.test(await question(`Stop it and listen here instead? [Y/n] `))) return;
+    const what = processCommand(pid);
+    if (what !== null && !/elefant-relay|cli\.js/.test(what)) {
+      // the pid in the lock file now belongs to some other program: the lock is stale
+      try { unlinkSync(p("receiver.pid")); } catch { /* already gone */ }
+      return listen(out);
+    }
+    out(`An older elefant-relay (pid ${pid}) is listening and may be stuck on an old setup.${what ? `\n  ${what.slice(0, 160)}` : ""}`);
+    if (!tty() || what === null) { out(`Stop it (kill ${pid}) or restart your AI app, then run elefant-relay start again.`); return; }
+    if (!/^y/i.test(await question(`Stop it and listen here instead? [y/N] `))) return;
     try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ }
     for (let i = 0; i < 20 && receiverPid() !== null; i++) await new Promise((r) => setTimeout(r, 250));
     return listen(out);
@@ -285,6 +301,13 @@ async function attach(x: ListenerInfo | null, pid: number, out: (s: string) => v
     if (receiverPid() !== pid) { out("The other listener stopped — listening here now."); return listen(out); }
     await new Promise((r) => setTimeout(r, 1000));
   }
+}
+
+/** The command line of a process (macOS/Linux), or null if unknown. */
+function processCommand(pid: number): string | null {
+  if (process.platform === "win32") return null;
+  const r = spawnSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" });
+  return r.status === 0 ? r.stdout.trim() : null;
 }
 
 /** Listen in this terminal (or attach to the listener that already runs). */
@@ -345,7 +368,7 @@ async function main(): Promise<void> {
         // first time: the code says which relay to use, so set up on the spot
         const { relay } = parseInvite(pos[0], process.env.ELEFANT_RELAY_URL);
         await setup(flags, relay, out);
-      }
+      } else if (!flags["no-register"]) refreshMcp(out);
       const cfg = mustConfig();
       const use = useFlag(flags, cfg);
       await afterPair(await joinInvite(mustIdentity(), cfg, pos[0], use), use, out);
@@ -373,6 +396,7 @@ async function main(): Promise<void> {
       return;
     }
     case "start": {
+      refreshMcp(out);
       await listen(out);
       return;
     }
@@ -450,6 +474,7 @@ async function main(): Promise<void> {
       if (!me || !cfg) { out("not set up — got a code? npx elefant-relay join <CODE@relay>"); return; }
       out(`${me.name} · ${cfg.use === "own" ? "own computers" : "with people"}${cfg.files ? " + files" : ""} · relay ${cfg.relay} · agent ${cfg.agent} · v${VERSION}`);
       out(listenerLine());
+      if (cfg.mcp !== "off" && (!cfg.mcp || cfg.mcp.version !== VERSION)) out(`! your AI app may still start an older elefant-relay${cfg.mcp ? ` (v${cfg.mcp.version})` : ""} — run elefant-relay start (it updates that) and restart the AI app`);
       out(`${loadPeers().length} peer(s)${loadPeers().length ? `: ${loadPeers().map((x) => x.name).join(", ")}` : ""} · ${listPending().length} request(s) waiting for your OK`);
       return;
     }
@@ -478,7 +503,7 @@ async function main(): Promise<void> {
         if (r.status !== 0) {
           const stray = join(homedir(), ".wrangler");
           const hint = existsSync(stray) && !existsSync(join(stray, "config"))
-            ? `\nIf you did log in and still see "Not logged in": a ${stray} folder (logs/cache only) can hide your login — move it away and try again.`
+            ? `\nIf you did log in and still see "Not logged in", a ${stray} folder with only logs/cache in it may be the cause (seen once) — moving it away helped there.`
             : "";
           throw new Error(`wrangler deploy failed (run \`npx wrangler login\` first)${hint}`);
         }

@@ -28,6 +28,8 @@ export interface Config {
   shareDir?: string;
   /** folder id shared by all of your own computers */
   ownFolder?: string;
+  /** which elefant-relay the AI apps start ("off" = not registered by us) */
+  mcp?: { version: string; path: string } | "off";
 }
 
 export interface Peer {
