@@ -14,6 +14,7 @@ xcrun notarytool submit "$DMG" --keychain-profile "$PROFILE" --wait
 xcrun stapler staple "$APP"
 xcrun stapler staple "$DMG"
 spctl -a -vv -t install "$DMG"
-gh release upload "$TAG" "$DMG" --clobber -R elefant-coder/elefant-relay
+OUT="release/ElefantRelay-$VER-universal.dmg"; cp "$DMG" "$OUT"
+gh release upload "$TAG" "$OUT" --clobber -R elefant-coder/elefant-relay
 gh release edit "$TAG" --prerelease=false -R elefant-coder/elefant-relay
 echo "done: notarized and uploaded to $TAG"
