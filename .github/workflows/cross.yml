@@ -18,9 +18,11 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
-      - name: Hide the code in logs
+      - name: Hide the code in logs (read from the event file, never written into a script or env block)
         shell: pwsh
-        run: Write-Host "::add-mask::${{ inputs.code }}"
+        run: |
+          $c = (Get-Content $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json).inputs.code
+          Write-Host "::add-mask::$c"
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
@@ -40,9 +42,8 @@ jobs:
           "APP=$($app.FullName)" | Out-File -Append $env:GITHUB_ENV
       - name: Join the Mac and talk
         shell: pwsh
-        env:
-          E2E_CODE: ${{ inputs.code }}
         run: |
+          $env:E2E_CODE = (Get-Content $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json).inputs.code
           $env:PATH = "$PWD\app\test\fake;$env:PATH"
           $env:FAKE_LOG = "$env:RUNNER_TEMP\fake-claude.jsonl"
           $env:E2E_OUT = "$env:RUNNER_TEMP\e2e"; New-Item -ItemType Directory -Force $env:E2E_OUT | Out-Null

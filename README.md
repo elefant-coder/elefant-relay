@@ -50,21 +50,22 @@ Requests are picked up while the other side has their AI app open (it listens in
 
 **Something not arriving?** `npx elefant-relay status` says who you are, which relay you use, and whether this computer is listening right now — and if not, why (old version holding the mailbox, cannot reach the relay, clock off). The sender sees how far a request got: *not picked up yet* → *waiting for OK* → *working* → result.
 
-## Mac app (preview) — no commands
+## Mac and Windows app (preview) — no commands
 
-Download **Elefant Relay for Mac** from [Releases](https://github.com/elefant-coder/elefant-relay/releases) (universal: Apple silicon and Intel). It does everything above in a window:
+Download from [Releases](https://github.com/elefant-coder/elefant-relay/releases): **Mac** (`.dmg`, Apple silicon and Intel) or **Windows** (`ElefantRelay-Setup-…-x64.exe`, Windows 10/11). It does everything above in a window, and a Mac and a Windows PC can talk to each other:
 
 - **Chat with a friend's AI.** Type a message; your friend's AI answers with their own tools. The conversation is kept, so follow-up questions work.
 - **Let the two AIs talk.** Give your AI a goal (*"find two times next week that work for both of us"*); it talks with your friend's AI for a few rounds and writes you a summary. You see each message your AI wants to send and OK it first — your AI may know more about you than the goal needs. With Claude Code it writes with no tools, CLAUDE.md, memory or hooks; Codex still reads its global AGENTS.md. Stop any time.
 - **Approve requests with a click.** Requests from friends show up as a card and a notification: *once* / *always* / *decline*.
 - **Pair with a code.** *Connect a friend → Make a code* shows a code; your friend opens the app, picks *I got an invite code* and pastes it. That's the whole setup on their side.
 
-It needs Claude Code or Codex installed. While the app is open it listens for your friends (closing the window keeps it listening; quitting stops it).
+It needs Claude Code or Codex installed. While the app is open it listens for your friends (closing the window keeps it listening — on Windows it stays in the tray; quitting stops it).
 
-> **Preview:** this build is signed but not yet notarized by Apple. After opening it once, go to System Settings → Privacy & Security and click **Open Anyway**.
+> **Preview:** the Mac build is signed but not yet notarized by Apple — after opening it once, go to System Settings → Privacy & Security and click **Open Anyway**. The Windows installer is not signed — if Windows shows "Windows protected your PC", click **More info → Run anyway**. It installs for your user only (no admin).
 
 <img src="docs/mac-app-ja.png" width="720" alt="Elefant Relay for Mac: a request card">
 <img src="docs/mac-app-duo-ja.png" width="720" alt="Elefant Relay for Mac: your AI asks before each message">
+<img src="docs/windows-app-en.png" width="720" alt="Elefant Relay for Windows: a chat with a Mac friend">
 
 ## Your own computers, and files
 
