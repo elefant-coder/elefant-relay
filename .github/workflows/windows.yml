@@ -38,6 +38,11 @@ jobs:
           $env:PATH = "$PWD\app\test\fake;$env:PATH"
           $env:FAKE_LOG = "$env:RUNNER_TEMP\fake-claude.jsonl"
           node app/test/run-pair.mjs --out "$env:RUNNER_TEMP\e2e" --exe "$env:APP"
+      - name: Window life (tray, second launch, quit) and an old 0.1.0 listener
+        shell: pwsh
+        run: |
+          $env:PATH = "$PWD\app\test\fake;$env:PATH"
+          node app/test/run-extra.mjs --out "$env:RUNNER_TEMP\e2e" --exe "$env:APP"
       - if: always()
         uses: actions/upload-artifact@v4
         with:

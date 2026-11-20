@@ -191,14 +191,17 @@ function createWindow() {
 
 let quitting = false;
 let tray = null;
+let trayImage = null;
 function showWindow() { if (!win) createWindow(); else { win.show(); win.focus(); } }
+function quitApp() { quitting = true; app.quit(); }
 function makeTray() {
-  tray = new Tray(nativeImage.createFromPath(join(import.meta.dirname, "build", "tray.png")));
+  trayImage = nativeImage.createFromPath(join(import.meta.dirname, "build", "tray.png"));
+  tray = new Tray(trayImage);
   tray.setToolTip("Elefant Relay");
   const ja2 = ja();
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: ja2 ? "開く" : "Open", click: showWindow },
-    { label: ja2 ? "終了（受け取りも止まります）" : "Quit (stops listening)", click: () => { quitting = true; app.quit(); } },
+    { label: ja2 ? "終了（受け取りも止まります）" : "Quit (stops listening)", click: quitApp },
   ]));
   tray.on("click", showWindow);
 }
@@ -218,7 +221,15 @@ app.whenReady().then(() => {
       const drive = (await import(pathToFileURL(process.env.ELEFANT_RELAY_TEST_DRIVER).href)).default;
       const shot = async (file) => { const { writeFileSync } = await import("node:fs"); writeFileSync(file, (await win.webContents.capturePage()).toPNG()); };
       let code = 0;
-      try { await drive({ js: (src) => win.webContents.executeJavaScript(src), shot }); } catch (e) { console.error("DRIVER FAILED:", e); code = 1; }
+      // what a person does outside the page: close the window, use the tray
+      const main = {
+        close: () => win?.close(),
+        visible: () => Boolean(win && !win.isDestroyed() && win.isVisible()),
+        tray: () => ({ exists: Boolean(tray && !tray.isDestroyed()), empty: trayImage ? trayImage.isEmpty() : true }),
+        trayQuit: quitApp,
+        execPath: process.execPath,
+      };
+      try { await drive({ js: (src) => win.webContents.executeJavaScript(src), shot, main }); } catch (e) { console.error("DRIVER FAILED:", e); code = 1; }
       rx?.close(); rx = null;
       quitting = true;
       app.exit(code);

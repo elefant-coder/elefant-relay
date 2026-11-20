@@ -48,3 +48,11 @@ export async function allowIncoming(js, ms) {
   await until(js, clickAlways, ms, "request card");
   await until(js, `${answeredNotes} > ${before}`, ms, "our AI answered");
 }
+
+/** the input box must stay on screen however long the conversation gets ("" = fine) */
+export const layoutProblem = `(() => { const c = document.querySelector(".compose, .duo"); if (!c) return "no input box"; const r = c.getBoundingClientRect(); const page = document.scrollingElement.scrollHeight; return r.bottom <= innerHeight + 1 && page <= innerHeight + 1 ? "" : "input box bottom " + Math.round(r.bottom) + "px, page " + page + "px, window " + innerHeight + "px"; })()`;
+export async function checkLayout(js, who) {
+  const p = await js(layoutProblem);
+  writeFileSync(out(`${who}-layout.txt`), p || "ok");
+  if (p) throw new Error(`layout: ${p}`);
+}

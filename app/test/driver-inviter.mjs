@@ -1,7 +1,7 @@
 // Inviter: set up with a relay URL, make a code, wait for the friend, chat, (AI-to-AI), answer the friend.
 // env: E2E_OUT E2E_RELAY E2E_NAME E2E_PAIR_MS E2E_DUO=1 E2E_EXPECT_CARD=1 E2E_WAIT_FILE
 import { writeFileSync } from "node:fs";
-import { OUT, out, env, sleep, until, waitFile, click, type, exists, log, closeModal, chatRoundTrip, allowIncoming } from "./ui.mjs";
+import { checkLayout, OUT, out, env, sleep, until, waitFile, click, type, exists, log, closeModal, chatRoundTrip, allowIncoming } from "./ui.mjs";
 
 export default async function ({ js, shot }) {
   const ms = Number(env("E2E_STEP_MS", "300000"));
@@ -41,6 +41,7 @@ export default async function ({ js, shot }) {
     await until(js, click(".tabs button:nth-of-type(1)"), 5000, "chat tab");
   }
   if (env("E2E_EXPECT_CARD")) { await allowIncoming(js, Number(env("E2E_CARD_MS", String(ms)))); await shot(out("inviter-6-answered.png")); }
+  await checkLayout(js, "inviter");
   writeFileSync(out("inviter-messages.txt"), await js(`document.querySelector(".msgs")?.innerText || ""`));
   writeFileSync(out("inviter-done"), "1");
   log("inviter done");

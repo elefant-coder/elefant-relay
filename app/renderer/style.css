@@ -13,9 +13,9 @@ button:disabled { opacity: .45; cursor: default; }
 input, textarea, select { font: inherit; color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: #fff; width: 100%; outline: none; }
 input:focus, textarea:focus { border-color: var(--purple-400); }
 textarea { resize: none; }
-.layout { display: grid; grid-template-columns: 260px 1fr; height: 100vh; }
+.layout { display: grid; grid-template-columns: 260px 1fr; grid-template-rows: 100vh; height: 100vh; overflow: hidden; }
 .drag { -webkit-app-region: drag; height: 38px; flex: none; }
-.side { background: var(--box); display: flex; flex-direction: column; border-right: 1px solid var(--line); }
+.side { background: var(--box); display: flex; flex-direction: column; min-height: 0; overflow: auto; border-right: 1px solid var(--line); }
 .brand { padding: 0 20px 14px; }
 .brand b { font-size: 15px; letter-spacing: .02em; }
 .brand .me { margin-top: 6px; font-size: 12px; color: var(--sub); display: flex; align-items: center; gap: 6px; }
@@ -30,7 +30,7 @@ textarea { resize: none; }
 .peer small { display: block; color: var(--sub); font-size: 11px; }
 .badge { margin-left: auto; background: var(--purple); color: #fff; font-size: 11px; border-radius: 10px; padding: 0 7px; }
 .side .add { margin: 10px; }
-.main { display: flex; flex-direction: column; min-width: 0; }
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .head { padding: 0 28px 14px; border-bottom: 1px solid var(--line); display: flex; align-items: flex-end; gap: 16px; }
 .head h2 { margin: 0; font-size: 20px; }
 .head .lead { color: var(--sub); font-size: 12px; }
@@ -43,7 +43,7 @@ textarea { resize: none; }
 .banner pre { margin: 6px 0 10px; white-space: pre-wrap; font: 12px/1.5 ui-monospace, Menlo, monospace; color: var(--sub); }
 .banner .row { display: flex; gap: 8px; flex-wrap: wrap; }
 .req { background: #fff; border-radius: 8px; padding: 10px 12px; margin: 8px 0 10px; white-space: pre-wrap; max-height: 160px; overflow: auto; }
-.msgs { flex: 1; overflow: auto; padding: 18px 28px; display: flex; flex-direction: column; gap: 14px; }
+.msgs { flex: 1; min-height: 0; overflow: auto; padding: 18px 28px; display: flex; flex-direction: column; gap: 14px; }
 .msg { max-width: 72%; }
 .msg .who { font-size: 11px; color: var(--sub); margin-bottom: 3px; }
 .msg .body { padding: 10px 14px; border-radius: 12px; white-space: pre-wrap; word-break: break-word; background: var(--box); }
