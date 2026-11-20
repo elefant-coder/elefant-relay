@@ -65,7 +65,7 @@ It needs Claude Code or Codex installed. While the app is open it listens for yo
 
 <img src="docs/mac-app-ja.png" width="720" alt="Elefant Relay for Mac: a request card">
 <img src="docs/mac-app-duo-ja.png" width="720" alt="Elefant Relay for Mac: your AI asks before each message">
-<img src="docs/windows-app-en.png" width="720" alt="Elefant Relay for Windows: a chat with a Mac friend">
+<img src="docs/windows-app-en.png" width="720" alt="Elefant Relay for Windows: connected, same check number on both sides">
 
 ## Your own computers, and files
 
