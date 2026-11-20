@@ -2,16 +2,17 @@
   "name": "elefant-relay-app",
   "productName": "Elefant Relay",
   "version": "0.2.0",
-  "description": "Talk with a friend's AI from your Mac — no commands.",
+  "description": "Talk with a friend's AI from your Mac or Windows PC — no commands.",
   "author": "Elefant Inc.",
   "license": "MIT",
   "private": true,
   "type": "module",
   "main": "main.mjs",
   "scripts": {
-    "lib": "rm -rf lib && cp -R ../dist/src lib && cp ../package.json lib/relay-package.json",
+    "lib": "node scripts/copy-lib.mjs",
     "start": "npm run lib && electron .",
-    "dist": "npm run lib && electron-builder --mac dmg --universal"
+    "dist": "npm run lib && electron-builder --mac dmg --universal",
+    "dist:win": "npm run lib && electron-builder --win nsis --x64 --publish never"
   },
   "build": {
     "appId": "com.elefant.relay",
@@ -25,6 +26,8 @@
       "chat.mjs",
       "renderer/**",
       "lib/**",
+      "build/icon.png",
+      "build/tray.png",
       "package.json"
     ],
     "mac": {
@@ -45,6 +48,24 @@
     "dmg": {
       "sign": true,
       "title": "Elefant Relay"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "ElefantRelay-Setup-${version}-${arch}.${ext}",
+      "shortcutName": "Elefant Relay",
+      "createDesktopShortcut": true
     }
   },
   "devDependencies": {

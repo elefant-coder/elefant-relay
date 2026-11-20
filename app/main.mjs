@@ -1,22 +1,34 @@
-// Elefant Relay for Mac — talk with a friend's AI without typing commands.
-import { app, BrowserWindow, ipcMain, Notification, clipboard, shell } from "electron";
+// Elefant Relay (Mac / Windows) — talk with a friend's AI without typing commands.
+import { app, BrowserWindow, ipcMain, Notification, clipboard, shell, Tray, Menu, nativeImage } from "electron";
 import { execFileSync, spawnSync } from "node:child_process";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
+import { pathToFileURL } from "node:url";
 
-// Apps opened from Finder get a bare PATH, so `claude` / `codex` are not found. Take the login shell's PATH.
+const WIN = process.platform === "win32";
+
+// Apps opened from Finder get a bare PATH, so `claude` / `codex` are not found: take the login shell's PATH.
+// Windows apps get the user's PATH already; add the folders the installers use in case it is stale.
 function fixPath() {
-  const extra = [join(homedir(), ".local/bin"), join(homedir(), ".claude/local"), "/opt/homebrew/bin", "/usr/local/bin", join(homedir(), ".npm-global/bin")];
+  const h = homedir();
+  const extra = WIN
+    ? [join(h, ".local", "bin"), join(process.env.APPDATA ?? join(h, "AppData", "Roaming"), "npm"), join(h, ".claude", "local")]
+    : [join(h, ".local/bin"), join(h, ".claude/local"), "/opt/homebrew/bin", "/usr/local/bin", join(h, ".npm-global/bin")];
   let fromShell = "";
-  try {
-    const out = execFileSync(process.env.SHELL || "/bin/zsh", ["-ilc", 'printf "__P__%s__P__" "$PATH"'], { encoding: "utf8", timeout: 8000, stdio: ["ignore", "pipe", "ignore"] });
-    fromShell = out.match(/__P__(.*)__P__/s)?.[1] ?? "";
-  } catch { /* fall back to the usual places */ }
-  const parts = [...fromShell.split(":"), ...(process.env.PATH ?? "").split(":"), ...extra].filter(Boolean);
-  process.env.PATH = [...new Set(parts)].join(":");
+  if (!WIN) {
+    try {
+      const out = execFileSync(process.env.SHELL || "/bin/zsh", ["-ilc", 'printf "__P__%s__P__" "$PATH"'], { encoding: "utf8", timeout: 8000, stdio: ["ignore", "pipe", "ignore"] });
+      fromShell = out.match(/__P__(.*)__P__/s)?.[1] ?? "";
+    } catch { /* fall back to the usual places */ }
+  }
+  const parts = [...fromShell.split(delimiter), ...(process.env.PATH ?? "").split(delimiter), ...extra].filter(Boolean);
+  process.env.PATH = [...new Set(parts)].join(delimiter);
 }
 fixPath();
 if (process.env.ELEFANT_RELAY_APP_DATA) app.setPath("userData", process.env.ELEFANT_RELAY_APP_DATA);
+// one window per user (the lock lives in the app data folder); a second launch shows the first one
+if (!app.requestSingleInstanceLock()) { app.exit(0); }
+if (WIN) app.setAppUserModelId("com.elefant.relay");
 
 const lib = (m) => import(new URL(`./lib/${m}.js`, import.meta.url).href);
 const [state, receiverMod, pair, crypto, client, agentMod, home, chatMod] = await Promise.all([
@@ -24,7 +36,7 @@ const [state, receiverMod, pair, crypto, client, agentMod, home, chatMod] = awai
 ]);
 const { startReceiver, receiverPid, listenerInfo } = receiverMod;
 
-const has = (cmd) => spawnSync("/usr/bin/which", [cmd], { stdio: "ignore" }).status === 0;
+const has = (cmd) => spawnSync(WIN ? "where.exe" : "/usr/bin/which", [cmd], { stdio: "ignore", windowsHide: true }).status === 0;
 const ja = () => app.getLocale().toLowerCase().startsWith("ja");
 
 let win = null;
@@ -40,7 +52,9 @@ function tryListen() {
 }
 
 function processCommand(pid) {
-  const r = spawnSync("/bin/ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" });
+  const r = WIN
+    ? spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter "ProcessId=${Number(pid)}").CommandLine`], { encoding: "utf8", windowsHide: true, timeout: 15000 })
+    : spawnSync("/bin/ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" });
   return r.status === 0 ? r.stdout.trim() : "";
 }
 
@@ -59,7 +73,7 @@ function snapshot() {
         title: ja() ? `${x.peer} のAIからお願いが届きました` : `${x.peer}'s AI is asking yours`,
         body: x.text.slice(0, 140),
       });
-      n.on("click", () => { win?.show(); win?.focus(); });
+      n.on("click", showWindow);
       n.show();
     }
   }
@@ -162,14 +176,32 @@ function createWindow() {
     width: 1080, height: 720, minWidth: 820, minHeight: 560,
     title: "Elefant Relay",
     backgroundColor: "#ffffff",
-    titleBarStyle: "hiddenInset",
+    ...(WIN ? { autoHideMenuBar: true, icon: join(import.meta.dirname, "build", "icon.png") } : { titleBarStyle: "hiddenInset" }),
     webPreferences: { preload: join(import.meta.dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https:\/\//.test(url)) void shell.openExternal(url); return { action: "deny" }; });
   win.webContents.on("will-navigate", (e) => e.preventDefault());
   void win.loadFile(join(import.meta.dirname, "renderer", "index.html"));
+  if (WIN) win.webContents.on("did-finish-load", () => { void win?.webContents.insertCSS(".drag { height: 10px; -webkit-app-region: no-drag; }"); });
+  // Windows has no Dock: closing the window hides it to the tray and keeps listening
+  win.on("close", (e) => { if (WIN && !quitting) { e.preventDefault(); win.hide(); } });
   win.on("closed", () => { win = null; });
 }
+
+let quitting = false;
+let tray = null;
+function showWindow() { if (!win) createWindow(); else { win.show(); win.focus(); } }
+function makeTray() {
+  tray = new Tray(nativeImage.createFromPath(join(import.meta.dirname, "build", "tray.png")));
+  tray.setToolTip("Elefant Relay");
+  const ja2 = ja();
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: ja2 ? "開く" : "Open", click: showWindow },
+    { label: ja2 ? "終了（受け取りも止まります）" : "Quit (stops listening)", click: () => { quitting = true; app.quit(); } },
+  ]));
+  tray.on("click", showWindow);
+}
+app.on("second-instance", showWindow);
 
 chatMod.init({ state, client, agentMod, home, push: () => win?.webContents.send("relay:changed") });
 
@@ -177,15 +209,17 @@ app.whenReady().then(() => {
   tryListen();
   setInterval(tryListen, 5000); // take over the mailbox when another listener goes away
   createWindow();
+  if (WIN) makeTray();
   app.on("activate", () => { if (!win) createWindow(); });
   if (process.env.ELEFANT_RELAY_TEST_DRIVER) {
     // test hook: a script that drives the window like a person (clicks, typing), then quits
     win.webContents.once("did-finish-load", async () => {
-      const drive = (await import(new URL(`file://${process.env.ELEFANT_RELAY_TEST_DRIVER}`).href)).default;
+      const drive = (await import(pathToFileURL(process.env.ELEFANT_RELAY_TEST_DRIVER).href)).default;
       const shot = async (file) => { const { writeFileSync } = await import("node:fs"); writeFileSync(file, (await win.webContents.capturePage()).toPNG()); };
       let code = 0;
       try { await drive({ js: (src) => win.webContents.executeJavaScript(src), shot }); } catch (e) { console.error("DRIVER FAILED:", e); code = 1; }
       rx?.close(); rx = null;
+      quitting = true;
       app.exit(code);
     });
   }
@@ -202,4 +236,4 @@ app.whenReady().then(() => {
 
 // keep listening while the window is closed; quitting stops it
 app.on("window-all-closed", () => { /* stay in the Dock */ });
-app.on("before-quit", () => { rx?.close(); rx = null; });
+app.on("before-quit", () => { quitting = true; rx?.close(); rx = null; });

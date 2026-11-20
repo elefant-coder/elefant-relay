@@ -141,9 +141,14 @@ function runLocal(prompt) {
       "--system-prompt", "You write short messages on behalf of a user, to another person's AI. You have no tools. Use only what is in the prompt."];
   }
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+    // Windows: claude/codex are often .cmd shims, which only start through cmd.exe
+    const win = process.platform === "win32";
+    const child = spawn(cmd, win ? args.map(A.winQuote) : args, { cwd, env, shell: win, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
     let out = "", err = "";
-    const timer = setTimeout(() => child.kill("SIGTERM"), 5 * 60_000);
+    const timer = setTimeout(() => {
+      if (win && child.pid) spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+      else child.kill("SIGTERM");
+    }, 5 * 60_000);
     child.stdout.on("data", (d) => { out += d.toString("utf8"); });
     child.stderr.on("data", (d) => { if (err.length < 4000) err += d.toString("utf8"); });
     child.on("error", (e) => { clearTimeout(timer); resolve({ ok: false, text: `could not start ${cmd}: ${e.message}` }); });

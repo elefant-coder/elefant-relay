@@ -1,0 +1,65 @@
+# Mac ↔ Windows: a Mac makes an invite on a throwaway relay; this Windows runner joins with the installed app,
+# answers the Mac's request, and asks the Mac's AI something. Started by hand with the code.
+name: cross
+on:
+  workflow_dispatch:
+    inputs:
+      build_run:
+        description: run id of a 'windows' run whose installer to use
+        required: true
+      code:
+        description: invite code (one-time, 10 minutes)
+        required: true
+permissions:
+  contents: read
+  actions: read
+jobs:
+  join:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Hide the code in logs
+        shell: pwsh
+        run: Write-Host "::add-mask::${{ inputs.code }}"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: installer
+          run-id: ${{ inputs.build_run }}
+          github-token: ${{ github.token }}
+          path: installer
+      - name: Install
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem installer/ElefantRelay-Setup-*.exe | Select-Object -First 1
+          Start-Process -Wait -FilePath $exe.FullName -ArgumentList '/S'
+          $app = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Elefant Relay.exe" | Select-Object -First 1
+          "APP=$($app.FullName)" | Out-File -Append $env:GITHUB_ENV
+      - name: Join the Mac and talk
+        shell: pwsh
+        env:
+          E2E_CODE: ${{ inputs.code }}
+        run: |
+          $env:PATH = "$PWD\app\test\fake;$env:PATH"
+          $env:FAKE_LOG = "$env:RUNNER_TEMP\fake-claude.jsonl"
+          $env:E2E_OUT = "$env:RUNNER_TEMP\e2e"; New-Item -ItemType Directory -Force $env:E2E_OUT | Out-Null
+          $env:E2E_NAME = "win-friend"; $env:E2E_SEND = "1"; $env:E2E_STEP_MS = "600000"
+          $env:ELEFANT_RELAY_HOME = "$env:RUNNER_TEMP\home"; $env:ELEFANT_RELAY_APP_DATA = "$env:RUNNER_TEMP\appdata"
+          $env:ELEFANT_RELAY_TEST_DRIVER = "$PWD\app\test\driver-joiner.mjs"
+          $p = Start-Process -FilePath $env:APP -PassThru -Wait -RedirectStandardError "$env:E2E_OUT\joiner.out"
+          Get-Content "$env:E2E_OUT\driver.log"
+          if ($p.ExitCode -ne 0) { Get-Content "$env:E2E_OUT\joiner.out"; throw "driver failed ($($p.ExitCode))" }
+          Write-Host "answer from the Mac:"; Get-Content "$env:E2E_OUT\joiner-answer.txt"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-cross
+          path: |
+            ${{ runner.temp }}/e2e/*.png
+            ${{ runner.temp }}/e2e/*answer.txt
+            ${{ runner.temp }}/e2e/*safety.txt
+            ${{ runner.temp }}/e2e/driver.log
+            ${{ runner.temp }}/e2e/joiner.out

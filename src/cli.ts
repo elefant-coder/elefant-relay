@@ -303,10 +303,11 @@ async function attach(x: ListenerInfo | null, pid: number, out: (s: string) => v
   }
 }
 
-/** The command line of a process (macOS/Linux), or null if unknown. */
+/** The command line of a process, or null if unknown. */
 function processCommand(pid: number): string | null {
-  if (process.platform === "win32") return null;
-  const r = spawnSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" });
+  const r = process.platform === "win32"
+    ? spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`], { encoding: "utf8", windowsHide: true, timeout: 15000 })
+    : spawnSync("ps", ["-p", String(pid), "-o", "command="], { encoding: "utf8" });
   return r.status === 0 ? r.stdout.trim() : null;
 }
 

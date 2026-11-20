@@ -1,0 +1,56 @@
+# Windows: run the tests, build the installer, install it, and click through two copies of the installed app.
+name: windows
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npm test
+      - name: Build the installer
+        working-directory: app
+        run: |
+          npm ci
+          npm run dist:win
+      - name: Install it (per user, silent)
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem app/release/ElefantRelay-Setup-*.exe | Select-Object -First 1
+          (Get-FileHash $exe -Algorithm SHA256).Hash | Tee-Object app/release/sha256.txt
+          Start-Process -Wait -FilePath $exe.FullName -ArgumentList '/S'
+          $app = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter "Elefant Relay.exe" | Select-Object -First 1
+          if (-not $app) { throw "installed app not found" }
+          "APP=$($app.FullName)" | Out-File -Append $env:GITHUB_ENV
+          Write-Host "installed at $($app.FullName)"
+      - name: Two installed copies talk (fake claude.cmd on PATH)
+        shell: pwsh
+        run: |
+          $env:PATH = "$PWD\app\test\fake;$env:PATH"
+          $env:FAKE_LOG = "$env:RUNNER_TEMP\fake-claude.jsonl"
+          node app/test/run-pair.mjs --out "$env:RUNNER_TEMP\e2e" --exe "$env:APP"
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-windows
+          path: |
+            ${{ runner.temp }}/e2e/*.png
+            ${{ runner.temp }}/e2e/*.txt
+            ${{ runner.temp }}/e2e/*.out
+            ${{ runner.temp }}/e2e/*.json
+            ${{ runner.temp }}/e2e/driver.log
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: |
+            app/release/ElefantRelay-Setup-*.exe
+            app/release/sha256.txt
