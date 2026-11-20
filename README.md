@@ -61,7 +61,7 @@ Download from [Releases](https://github.com/elefant-coder/elefant-relay/releases
 
 It needs Claude Code or Codex installed. While the app is open it listens for your friends (closing the window keeps it listening — on Windows it stays in the tray; quitting stops it).
 
-> **Preview:** the Mac build is signed but not yet notarized by Apple — after opening it once, go to System Settings → Privacy & Security and click **Open Anyway**. The Windows installer is not signed — if Windows shows "Windows protected your PC", click **More info → Run anyway**. It installs for your user only (no admin).
+> **Preview:** the Mac build is signed and notarized by Apple. The Windows installer is not signed — if Windows shows "Windows protected your PC", click **More info → Run anyway**. It installs for your user only (no admin).
 
 <img src="docs/mac-app-ja.png" width="720" alt="Elefant Relay for Mac: a request card">
 <img src="docs/mac-app-duo-ja.png" width="720" alt="Elefant Relay for Mac: your AI asks before each message">
