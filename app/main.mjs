@@ -92,6 +92,7 @@ function snapshot() {
     pending: pending.map((x) => ({ id: x.id, peer: x.peer, mode: x.mode, text: x.text.slice(0, 4000), received: x.received })),
     invites: home.readJson(home.p("invites.json"), []).filter((i) => Date.now() - i.created < 600_000).length,
     lang: ja() ? "ja" : "en",
+    platform: process.platform,
   };
 }
 
