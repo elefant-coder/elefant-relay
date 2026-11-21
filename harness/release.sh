@@ -9,9 +9,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
-VER=${1:?usage: harness/release.sh <version> --notes FILE [--dry-run]}
+VER=${1:?usage: harness/release.sh <version> --notes FILE [--dry-run]   |   harness/release.sh --verify <version>}
 shift
-NOTES="" DRY=0
+NOTES="" DRY=0 VERIFY_ONLY=0
+if [ "$VER" = "--verify" ]; then VERIFY_ONLY=1; VER=${1:?usage: harness/release.sh --verify <version>}; shift; fi
 while [ $# -gt 0 ]; do case $1 in --notes) NOTES=$2; shift 2;; --dry-run) DRY=1; shift;; *) echo "unknown: $1"; exit 2;; esac; done
 [ -f harness/release.local.env ] && source harness/release.local.env
 REPO=${RELEASE_REPO:-elefant-coder/elefant-relay}
@@ -19,6 +20,31 @@ TAG="mac-v$VER"
 say() { printf '\n== %s\n' "$*"; }
 die() { echo "STOP: $*" >&2; exit 1; }
 run() { if [ $DRY = 1 ]; then echo "(dry-run) $*"; else "$@"; fi; }
+
+verify_downloads() { # what people download == the tested commit ($VER $TAG $SHA)
+  V=$(mktemp -d)
+  for f in "ElefantRelay-$VER-universal.dmg" "ElefantRelay-Setup-$VER-x64.exe"; do
+    curl -sSfL -o "$V/$f" "https://github.com/$REPO/releases/download/$TAG/$f"
+    want=$(gh release view "$TAG" -R "$REPO" --json assets -q ".assets[] | select(.name==\"$f\") | .digest" | sed 's/^sha256://')
+    got=$(shasum -a 256 "$V/$f" | cut -d' ' -f1)
+    [ -z "$want" ] || [ "$want" = "$got" ] || die "$f: sha256 differs from the release"
+    echo "ok $f $got"
+  done
+  xattr -w com.apple.quarantine "0081;$(printf %x "$(date +%s)");Safari;" "$V/ElefantRelay-$VER-universal.dmg"
+  spctl -a -vv -t install "$V/ElefantRelay-$VER-universal.dmg" 2>&1 | grep -q "Notarized Developer ID" || die "DMG is not notarized"
+  M=$(mktemp -d); hdiutil attach -quiet -readonly -nobrowse -mountpoint "$M" "$V/ElefantRelay-$VER-universal.dmg"
+  trap 'hdiutil detach -quiet "$M" 2>/dev/null || true' EXIT
+  xcrun stapler validate "$M/Elefant Relay.app" >/dev/null || die ".app has no notarization ticket"
+  X=$(mktemp -d); "$ROOT/app/node_modules/.bin/asar" extract "$M/Elefant Relay.app/Contents/Resources/app.asar" "$X"
+  for f in renderer/app.js main.mjs chat.mjs preload.cjs; do
+    cmp -s "$X/$f" <(git show "$SHA:app/$f") || die "the DMG's $f is not the tested commit"
+  done
+  echo "ok DMG notarized, stapled, and its app files match $SHA"
+}
+
+if [ $VERIFY_ONLY = 1 ]; then # check an existing release only
+  git fetch -q --tags origin; SHA=$(git rev-list -n1 "$TAG"); echo "$TAG = $SHA"; verify_downloads; exit 0
+fi
 
 say "0. preconditions"
 [[ $VER =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "version must look like 0.2.3"
@@ -81,26 +107,7 @@ if [ $DRY = 1 ]; then echo "(dry-run) download artifact 'installer' from the CI 
 fi
 
 say "7. verify what people download"
-if [ $DRY = 1 ]; then echo "(dry-run) download both without auth, compare sha256, spctl the DMG, compare app.asar renderer with git"; else
-  V=$(mktemp -d)
-  for f in "ElefantRelay-$VER-universal.dmg" "ElefantRelay-Setup-$VER-x64.exe"; do
-    curl -sSfL -o "$V/$f" "https://github.com/$REPO/releases/download/$TAG/$f"
-    want=$(gh release view "$TAG" -R "$REPO" --json assets -q ".assets[] | select(.name==\"$f\") | .digest" | sed 's/^sha256://')
-    got=$(shasum -a 256 "$V/$f" | cut -d' ' -f1)
-    [ -z "$want" ] || [ "$want" = "$got" ] || die "$f: sha256 differs from the release"
-    echo "ok $f $got"
-  done
-  xattr -w com.apple.quarantine "0081;$(printf %x "$(date +%s)");Safari;" "$V/ElefantRelay-$VER-universal.dmg"
-  spctl -a -vv -t install "$V/ElefantRelay-$VER-universal.dmg" 2>&1 | grep -q "Notarized Developer ID" || die "DMG is not notarized"
-  M=$(mktemp -d); hdiutil attach -quiet -readonly -nobrowse -mountpoint "$M" "$V/ElefantRelay-$VER-universal.dmg"
-  trap 'hdiutil detach -quiet "$M" 2>/dev/null || true' EXIT
-  xcrun stapler validate "$M/Elefant Relay.app" >/dev/null || die ".app has no notarization ticket"
-  X=$(mktemp -d); "$ROOT/app/node_modules/.bin/asar" extract "$M/Elefant Relay.app/Contents/Resources/app.asar" "$X"
-  for f in renderer/app.js main.mjs chat.mjs preload.cjs; do
-    cmp -s "$X/$f" <(git show "$SHA:app/$f") || die "the DMG's $f is not the tested commit"
-  done
-  echo "ok DMG notarized, stapled, and its app files match $SHA"
-fi
+if [ $DRY = 1 ]; then echo "(dry-run) download both without auth, compare sha256, spctl the DMG, compare app.asar files with git"; else verify_downloads; fi
 
 say "8. landing page links → $VER"
 if [ -n "${LP_DIR:-}" ] && [ -f "$LP_DIR/content.html" ]; then

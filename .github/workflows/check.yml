@@ -1,0 +1,33 @@
+# macOS: the same gate as harness/check.sh (tests, two apps pairing, real-mouse click checks) on every push.
+name: check
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  mac:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: cd app && npm ci
+      - run: harness/check.sh
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: check-mac
+          path: |
+            harness/out/*/summary.md
+            harness/out/*/*.log
+            harness/out/*/clicks/checks.jsonl
+            harness/out/*/clicks/app.out
+            harness/out/*/clicks/driver.log
+            harness/out/*/pair/*.png
+            harness/out/*/pair/*.out
