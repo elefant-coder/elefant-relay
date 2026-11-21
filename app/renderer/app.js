@@ -95,19 +95,23 @@ async function call(name, arg) {
   return r.value;
 }
 
-async function refresh() {
+let lastSig = "";
+async function refresh(poll = false) {
   try {
     S = await call("state");
     L = T[S.lang] || T.en;
     if (cur && !S.peers.some((p) => p.name === cur)) cur = null;
     if (!cur && S.peers[0]) cur = S.peers[0].name;
     chat = cur ? await call("chat", { peer: cur }) : { messages: [], duo: { running: false, waiting: null } };
-    if (modal?.kind === "invite" && modal.code && S.peers.length > modal.before) {
+    if (modal?.kind === "connect" && modal.invite && S.peers.length > modal.before) {
       const p = S.peers[S.peers.length - 1];
       modal = { kind: "paired", peer: p.name, safety: p.safety };
       cur = p.name;
     }
   } catch (e) { console.error(e); }
+  const sig = JSON.stringify([S, chat, modal?.kind]);
+  if (poll && (sig === lastSig || document.activeElement?.tagName === "SELECT")) return;
+  lastSig = sig;
   render();
 }
 
@@ -241,7 +245,7 @@ function duoBar(peer) {
   }
   return h("div", { class: "duo" },
     h("textarea", { id: "ta-duo", placeholder: L.duoPlaceholder(peer), value: drafts.duo[peer] || "", oninput: (e) => { drafts.duo[peer] = e.target.value; } }),
-    h("select", { onchange: (e) => { roundsSel = Number(e.target.value); } }, [2, 3, 4, 6].map((k) => h("option", { value: String(k), selected: k === roundsSel }, L.rounds(k)))),
+    h("select", { id: "sel-rounds", onchange: (e) => { roundsSel = Number(e.target.value); e.target.blur(); }, onblur: () => refresh() }, [2, 3, 4, 6].map((k) => h("option", { value: String(k), selected: k === roundsSel }, L.rounds(k)))),
     h("button", { class: "primary", onclick: async () => {
       const goal = (drafts.duo[peer] || "").trim();
       if (!goal) return;
@@ -286,12 +290,19 @@ function overlay() {
         h("button", { class: m.tab === "make" ? "on" : "", onclick: () => { m.tab = "make"; render(); } }, L.makeCode),
         h("button", { class: m.tab === "enter" ? "on" : "", onclick: () => { m.tab = "enter"; render(); } }, L.enterCode))];
     if (m.tab === "make") {
-      if (!m.code && !m.loading) {
+      if (!m.invite && !m.loading && !m.error) {
         m.loading = true;
-        call("invite").then((r) => { modal = { kind: "invite", code: r.code, before: S.peers.length }; render(); })
+        call("invite").then((r) => { if (modal !== m) return; m.loading = false; m.invite = r.code; m.before = S.peers.length; render(); })
           .catch((e) => { m.loading = false; m.error = e.message; render(); });
       }
-      body.push(h("p", { class: "lead" }, L.makeLead), h("div", { class: "code" }, "…"), m.error ? h("div", { class: "err" }, m.error) : null);
+      if (m.invite) {
+        const copyBtn = h("button", { onclick: async () => { await call("copy", { text: m.invite }); copyBtn.textContent = L.copied; } }, L.copy);
+        body.push(h("p", { class: "lead" }, L.makeLead), h("div", { class: "code long" }, m.invite),
+          h("p", { class: "small" }, L.waiting), h("div", { class: "row" }, h("button", { class: "ghost", onclick: close }, L.cancel), copyBtn));
+      } else {
+        body.push(h("p", { class: "lead" }, L.makeLead), h("div", { class: "code" }, "…"), m.error ? h("div", { class: "err" }, m.error) : null,
+          h("div", { class: "row" }, h("button", { class: "ghost", onclick: close }, L.cancel)));
+      }
     } else {
       body.push(h("p", { class: "lead" }, L.enterLead),
         h("input", { id: "in-join", placeholder: "K7Q-M2X@relay.example.workers.dev", value: m.code || "", oninput: (e) => { m.code = e.target.value; } }), err,
@@ -301,11 +312,6 @@ function overlay() {
             catch (e) { err.textContent = e.message; }
           } }, L.join)));
     }
-    if (m.tab === "make") body.push(h("div", { class: "row" }, h("button", { class: "ghost", onclick: close }, L.cancel)));
-  } else if (m.kind === "invite") {
-    const copyBtn = h("button", { onclick: async () => { await call("copy", { text: m.code }); copyBtn.textContent = L.copied; } }, L.copy);
-    body = [h("h3", {}, L.connectTitle), h("p", { class: "lead" }, L.makeLead), h("div", { class: "code long" }, m.code),
-      h("p", { class: "small" }, L.waiting), h("div", { class: "row" }, h("button", { class: "ghost", onclick: close }, L.cancel), copyBtn)];
   } else if (m.kind === "paired") {
     body = [h("h3", {}, L.paired(m.peer)), h("p", { class: "lead" }, L.checkLead), h("div", { class: "check" }, m.safety),
       h("div", { class: "row" }, h("button", { class: "primary", onclick: close }, L.done))];
@@ -313,6 +319,6 @@ function overlay() {
   return h("div", { class: "overlay" }, h("div", { class: "modal" }, ...body.flat()));
 }
 
-R.onChange(() => refresh());
+R.onChange(() => refresh(true));
 refresh();
-setInterval(refresh, 1500);
+setInterval(() => refresh(true), 1500);

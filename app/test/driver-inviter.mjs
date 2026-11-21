@@ -27,9 +27,15 @@ export default async function ({ js, shot }) {
     await until(js, click(".tabs button:nth-of-type(2)"), 5000, "duo tab");
     await sleep(300);
     await until(js, type("#ta-duo", "Pick one time for a meeting next week. We are free on Wednesday afternoon."), 5000, "goal");
-    await js(`(() => { const s = document.querySelector(".duo select"); s.value = "2"; s.dispatchEvent(new Event("change")); return true; })()`);
+    // the rounds menu must survive the 1.5 s refresh while it is open (focused); then pick the last choice (6)
+    await js(`(() => { const s = document.querySelector(".duo select"); s.dataset.mark = "1"; s.focus(); return true; })()`);
+    await sleep(4000);
+    if (!(await js(`(() => { const s = document.querySelector(".duo select"); return !!s && s.dataset.mark === "1" && document.activeElement === s; })()`))) throw new Error("rounds menu was redrawn while open");
+    await js(`(() => { const s = document.querySelector(".duo select"); s.value = "6"; s.dispatchEvent(new Event("change")); return true; })()`);
+    await sleep(2000);
+    if (!(await js(`document.querySelector(".duo select")?.value === "6"`))) throw new Error("rounds choice did not stick");
     await until(js, click(".duo button.primary"), 5000, "duo start");
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 14; i++) {
       const r = await until(js, `document.querySelector(".summary") ? "summary" : (document.querySelector(".msgs ~ .banner button.primary") ? "confirm" : "")`, ms, `duo step ${i}`);
       if (r === "summary") break;
       if (i === 0) await shot(out("inviter-4-confirm.png"));
@@ -37,6 +43,7 @@ export default async function ({ js, shot }) {
       await sleep(2000);
     }
     await until(js, exists(".summary"), ms, "summary");
+    if (!(await js(`/6往復|up to 6 turns/.test(document.querySelector(".msgs")?.innerText || "")`))) throw new Error("AI-to-AI did not start with 6 rounds");
     await shot(out("inviter-5-summary.png"));
     await until(js, click(".tabs button:nth-of-type(1)"), 5000, "chat tab");
   }

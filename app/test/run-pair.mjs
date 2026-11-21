@@ -1,6 +1,7 @@
 // Two copies of the app on this computer, a local relay, real clicks: invite → join → chat both ways → AI-to-AI.
 // usage: node run-pair.mjs --out DIR [--exe PATH_TO_APP_BINARY] [--echo]   (no --exe = run from source with electron)
 // --echo: answer with the echo fixture instead of claude (for machines with a real, logged-in claude)
+// --connect: the friend sets up with the relay URL, then joins from "Connect a friend" → "Enter a code"
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -13,6 +14,7 @@ const arg = (k) => { const i = process.argv.indexOf(k); return i > 0 ? process.a
 const OUT = resolve(arg("--out") ?? join(appDir, "e2e-out"));
 const exe = arg("--exe");
 const echo = process.argv.includes("--echo");
+const viaConnect = process.argv.includes("--connect");
 const port = 28000 + Math.floor(Math.random() * 1000);
 mkdirSync(OUT, { recursive: true });
 
@@ -39,7 +41,7 @@ function launch(role, extraEnv) {
 
 const a = launch("inviter", { E2E_RELAY: `http://127.0.0.1:${port}`, E2E_NAME: "taka", E2E_DUO: "1", E2E_EXPECT_CARD: "1", E2E_WAIT_FILE: join(OUT, "joiner-done") });
 await new Promise((r) => setTimeout(r, 3000));
-const c = launch("joiner", { E2E_NAME: "friend", E2E_SEND: "1", E2E_WAIT_FILE: join(OUT, "inviter-done") });
+const c = launch("joiner", { E2E_NAME: "friend", E2E_SEND: "1", E2E_WAIT_FILE: join(OUT, "inviter-done"), ...(viaConnect ? { E2E_VIA_CONNECT: "1", E2E_RELAY: `http://127.0.0.1:${port}` } : {}) });
 const [ca, cc] = await Promise.all([a, c]);
 relay.kill();
 
