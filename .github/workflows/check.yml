@@ -18,7 +18,10 @@ jobs:
           node-version: 22
       - run: npm ci
       - run: cd app && npm ci
-      - run: harness/check.sh
+      - name: harness/check.sh (a fake claude on PATH — the runner has no AI app, and the app won't start without one)
+        run: |
+          export PATH="$PWD/app/test/fake:$PATH" FAKE_LOG="$RUNNER_TEMP/fake-claude.jsonl"
+          harness/check.sh
       - if: always()
         uses: actions/upload-artifact@v4
         with:
