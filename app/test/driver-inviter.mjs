@@ -27,13 +27,14 @@ export default async function ({ js, shot }) {
     await until(js, click(".tabs button:nth-of-type(2)"), 5000, "duo tab");
     await sleep(300);
     await until(js, type("#ta-duo", "Pick one time for a meeting next week. We are free on Wednesday afternoon."), 5000, "goal");
-    // the rounds menu must survive the 1.5 s refresh while it is open (focused); then pick the last choice (6)
-    await js(`(() => { const s = document.querySelector(".duo select"); s.dataset.mark = "1"; s.focus(); return true; })()`);
+    // rounds are four buttons (2/3/4/6): every choice can be picked, and the choice stays across refreshes
+    for (const k of ["2", "3", "4", "6"]) {
+      await until(js, click(`.rounds button[data-k="${k}"]`), 5000, `rounds ${k}`);
+      if (!(await js(`document.querySelector(".rounds button.on")?.dataset.k === "${k}"`))) throw new Error(`rounds ${k} was not picked`);
+    }
     await sleep(4000);
-    if (!(await js(`(() => { const s = document.querySelector(".duo select"); return !!s && s.dataset.mark === "1" && document.activeElement === s; })()`))) throw new Error("rounds menu was redrawn while open");
-    await js(`(() => { const s = document.querySelector(".duo select"); s.value = "6"; s.dispatchEvent(new Event("change")); return true; })()`);
-    await sleep(2000);
-    if (!(await js(`document.querySelector(".duo select")?.value === "6"`))) throw new Error("rounds choice did not stick");
+    if (!(await js(`document.querySelector(".rounds button.on")?.dataset.k === "6"`))) throw new Error("rounds choice did not stick");
+    await shot(out("inviter-3b-rounds.png"));
     await until(js, click(".duo button.primary"), 5000, "duo start");
     for (let i = 0; i < 14; i++) {
       const r = await until(js, `document.querySelector(".summary") ? "summary" : (document.querySelector(".msgs ~ .banner button.primary") ? "confirm" : "")`, ms, `duo step ${i}`);

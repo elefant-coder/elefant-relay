@@ -77,7 +77,10 @@ textarea { resize: none; }
 .check { font: 600 26px/1.2 ui-monospace, Menlo, monospace; color: var(--purple); }
 .duo { padding: 14px 28px 18px; border-top: 1px solid var(--line); display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: end; }
 .duo textarea { height: 64px; }
-.duo select { width: auto; }
+.rounds { display: flex; flex-direction: column; gap: 4px; }
+.rounds small { font-size: 11px; color: var(--sub); }
+.rounds .tabs { margin-left: 0; }
+.rounds .tabs button { min-width: 34px; padding: 6px 10px; }
 .m0 { margin: 0; }
 .tabs.inline { display: inline-flex; margin: 12px 0 4px; }
 .code.long { font-size: 18px; word-break: break-all; }

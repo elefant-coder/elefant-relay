@@ -18,7 +18,7 @@ const T = {
     paired: (n) => `${n} とつながりました`, checkLead: "相手の画面にも同じ番号が出ていれば、間違いなく本人です。", done: "OK",
     emptyTitle: "友達とつないでみましょう", emptyLead: "左下の「友達とつなぐ」からコードを作るか、もらったコードを入れます。",
     placeholder: (n) => `${n} の AI に話しかける（${S?.platform === "win32" ? "Ctrl+Enter" : "⌘Enter"} で送る）`, send: "送る",
-    duoPlaceholder: (n) => `AI同士で話してほしいこと（例：来週の打ち合わせの候補を3つに絞って）`, rounds: (k) => `${k}往復まで`,
+    duoPlaceholder: (n) => `AI同士で話してほしいこと（例：来週の打ち合わせの候補を3つに絞って）`, rounds: (k) => `${k}往復まで`, roundsLabel: "何往復まで",
     duoStart: "話してもらう", duoStop: "止める", duoRunning: "AI同士で話しています…",
     duoConfirm: "あなたの AI が次の文を相手に送ろうとしています。知られたくないことが入っていないか見てから送ってください", ok: "送る", ng: "やめる",
     who: { me: "あなた", "peer-ai": (n) => `${n} の AI`, "my-ai": "あなたの AI", incoming: (n) => `${n} の AI からのお願い` },
@@ -49,7 +49,7 @@ const T = {
     paired: (n) => `Connected with ${n}`, checkLead: "If their screen shows the same number, it is really them.", done: "OK",
     emptyTitle: "Connect with a friend", emptyLead: "Use “Connect a friend” at the bottom left to make or enter a code.",
     placeholder: (n) => `Talk to ${n}'s AI (${S?.platform === "win32" ? "Ctrl+Enter" : "⌘Enter"} to send)`, send: "Send",
-    duoPlaceholder: () => "What should the two AIs work out? (e.g. pick 3 times for next week's meeting)", rounds: (k) => `up to ${k} turns`,
+    duoPlaceholder: () => "What should the two AIs work out? (e.g. pick 3 times for next week's meeting)", rounds: (k) => `up to ${k} turns`, roundsLabel: "Max turns",
     duoStart: "Start", duoStop: "Stop", duoRunning: "The AIs are talking…",
     duoConfirm: "Your AI wants to send this. Check that nothing private is in it before sending", ok: "Send", ng: "Cancel",
     who: { me: "You", "peer-ai": (n) => `${n}'s AI`, "my-ai": "Your AI", incoming: (n) => `Request from ${n}'s AI` },
@@ -110,7 +110,7 @@ async function refresh(poll = false) {
     }
   } catch (e) { console.error(e); }
   const sig = JSON.stringify([S, chat, modal?.kind]);
-  if (poll && (sig === lastSig || document.activeElement?.tagName === "SELECT")) return;
+  if (poll && sig === lastSig) return;
   lastSig = sig;
   render();
 }
@@ -245,7 +245,10 @@ function duoBar(peer) {
   }
   return h("div", { class: "duo" },
     h("textarea", { id: "ta-duo", placeholder: L.duoPlaceholder(peer), value: drafts.duo[peer] || "", oninput: (e) => { drafts.duo[peer] = e.target.value; } }),
-    h("select", { id: "sel-rounds", onchange: (e) => { roundsSel = Number(e.target.value); e.target.blur(); }, onblur: () => refresh() }, [2, 3, 4, 6].map((k) => h("option", { value: String(k), selected: k === roundsSel }, L.rounds(k)))),
+    h("div", { class: "rounds" }, h("small", {}, L.roundsLabel),
+      h("div", { class: "tabs", role: "group", "aria-label": L.roundsLabel }, [2, 3, 4, 6].map((k) => h("button", {
+        class: k === roundsSel ? "on" : "", "data-k": String(k), title: L.rounds(k), "aria-pressed": k === roundsSel ? "true" : "false",
+        onclick: () => { roundsSel = k; render(); } }, String(k))))),
     h("button", { class: "primary", onclick: async () => {
       const goal = (drafts.duo[peer] || "").trim();
       if (!goal) return;
