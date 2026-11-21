@@ -73,7 +73,7 @@ say "2. the gate on $SHA"
 if [ "$(cut -d' ' -f1 harness/out/last-pass 2>/dev/null)" = "$SHA" ]; then echo "already passed: $(cat harness/out/last-pass)"
 else harness/check.sh || die "the gate failed — fix it first"; fi
 
-say "3. push and wait for Windows CI on $SHA"
+say "3. push and wait for CI on $SHA (Windows build + macOS gate)"
 run git push -q origin main
 if [ $DRY = 1 ]; then
   echo "(dry-run) latest windows run on HEAD: $(gh run list -R "$REPO" -w windows.yml -c "$SHA" -L 1 --json conclusion,databaseId -q '.[0] | "\(.databaseId) \(.conclusion)"' 2>/dev/null || echo none)"
@@ -86,6 +86,8 @@ else
     gh run watch "$RUN" -R "$REPO" --exit-status --interval 30 >/dev/null || die "Windows CI failed twice: gh run view $RUN -R $REPO --log-failed"
   fi
   [ "$(gh run view "$RUN" -R "$REPO" --json headSha -q .headSha)" = "$SHA" ] || die "CI ran a different commit"
+  MRUN=$(gh run list -R "$REPO" -w check.yml -c "$SHA" -L 1 --json databaseId -q '.[0].databaseId')
+  [ -n "$MRUN" ] && { gh run watch "$MRUN" -R "$REPO" --exit-status --interval 30 >/dev/null || die "the macOS gate on GitHub failed: gh run view $MRUN -R $REPO --log-failed"; }
 fi
 
 say "4. tag and draft release"

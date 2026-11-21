@@ -18,6 +18,6 @@ Add one row every time a bug reaches users or a verifier sends work back. A case
 | 11 | 0.2.0 (dev) | AI-to-AI answered with the user's private notes | the tool-less AI still loaded CLAUDE.md / memory | run-pair FAKE_LOG checks (Windows CI) | — |
 
 ## Known gaps (no check yet)
-- Windows timing: the click checks run on macOS only (harness/check.sh); Windows CI runs run-pair/run-extra.
+- Windows timing: the click checks run on macOS only (locally and in .github/workflows/check.yml); Windows CI runs run-pair/run-extra.
 - Real Claude Code / Codex on Windows, SmartScreen, Windows on ARM, a Japanese-language Windows.
 - A mouse released outside the window (sendInputEvent does not go through the OS capture).
