@@ -38,6 +38,8 @@ jobs:
           $env:PATH = "$PWD\app\test\fake;$env:PATH"
           $env:FAKE_LOG = "$env:RUNNER_TEMP\fake-claude.jsonl"
           node app/test/run-pair.mjs --out "$env:RUNNER_TEMP\e2e" --exe "$env:APP"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          node app/test/run-pair.mjs --out "$env:RUNNER_TEMP\e2e-connect" --exe "$env:APP" --connect
       - name: Window life (tray, second launch, quit) and an old 0.1.0 listener
         shell: pwsh
         run: |
