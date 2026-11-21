@@ -1,6 +1,6 @@
 // Two copies of the app on this computer, a local relay, real clicks: invite → join → chat both ways → AI-to-AI.
 // usage: node run-pair.mjs --out DIR [--exe PATH_TO_APP_BINARY] [--echo]   (no --exe = run from source with electron)
-// --echo: answer with the echo fixture instead of claude (for machines with a real, logged-in claude)
+// --echo: answer friends' requests with the echo fixture; AI-to-AI always uses the stand-in claude in test/fake unless --real-ai
 // --connect: the friend sets up with the relay URL, then joins from "Connect a friend" → "Enter a code"
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -25,8 +25,10 @@ function launch(role, extraEnv) {
   const home = join(OUT, `home-${role}`);
   mkdirSync(home, { recursive: true });
   if (echo) writeFileSync(join(home, "config.json"), JSON.stringify({ agent: "command", command: `"${process.execPath}" "${join(repo, "test", "fixtures", "echo-agent.mjs")}"` }));
+  // a stand-in claude first on PATH (records how it was called); --real-ai to use the installed one
+  const PATH = process.argv.includes("--real-ai") ? process.env.PATH : [join(here, "fake"), process.env.PATH].join(process.platform === "win32" ? ";" : ":");
   const env = {
-    ...process.env, ...extraEnv,
+    ...process.env, PATH, ...extraEnv,
     E2E_OUT: OUT, E2E_STEP_MS: "300000",
     ELEFANT_RELAY_HOME: home, ELEFANT_RELAY_APP_DATA: join(OUT, `appdata-${role}`),
     ELEFANT_RELAY_TEST_DRIVER: join(here, `driver-${role}.mjs`),

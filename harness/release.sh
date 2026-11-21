@@ -2,8 +2,8 @@
 # Release the Mac/Windows app. The only way to ship: it refuses unless the gate passed on this exact commit
 # and Windows CI is green for it, and it checks that what people download is what was tested.
 #
-#   harness/release.sh 0.2.3 --notes notes.md --dry-run   check everything, change nothing
-#   harness/release.sh 0.2.3 --notes notes.md             bump → gate → push → CI → tag → release → Mac (notarize) → Windows → verify → LP
+#   harness/release.sh 0.2.3 --notes /tmp/notes.md --dry-run   check everything, change nothing
+#   harness/release.sh 0.2.3 --notes /tmp/notes.md             bump → gate → push → CI → tag → release → Mac (notarize) → Windows → verify → LP
 #
 # Local settings (not committed): harness/release.local.env — see harness/release.example.env
 set -euo pipefail
@@ -39,6 +39,7 @@ verify_downloads() { # what people download == the tested commit ($VER $TAG $SHA
   for f in main.mjs chat.mjs preload.cjs $(git ls-tree -r --name-only "$SHA" app/renderer | sed 's#^app/##'); do
     cmp -s "$X/$f" <(git show "$SHA:app/$f") || die "the DMG's $f is not the tested commit"
   done
+  diff <(cd "$X" && find renderer -type f | sort) <(git ls-tree -r --name-only "$SHA" app/renderer | sed 's#^app/##' | sort) >/dev/null || die "the DMG's renderer/ has files that are not in git at $SHA"
   # lib/ is the compiled src/ of the same commit
   L=$(mktemp -d); git archive "$SHA" src tsconfig.json package.json | tar -x -C "$L"; ln -s "$ROOT/node_modules" "$L/node_modules"
   (cd "$L" && npx tsc -p . --outDir out >/dev/null) || die "could not compile src at $SHA"
@@ -65,7 +66,16 @@ if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
   [ "$(git rev-list -n1 "$TAG")" = "$(git rev-parse HEAD)" ] || die "tag $TAG exists on another commit"
   echo "tag $TAG already on HEAD: resuming a release that stopped part-way"
 fi
-[ "$(gh release view "$TAG" -R "$REPO" --json isDraft -q .isDraft 2>/dev/null || echo none)" = false ] && die "release $TAG is already published"
+PUBLISHED=0
+if [ "$(gh release view "$TAG" -R "$REPO" --json isDraft -q .isDraft 2>/dev/null || echo none)" = false ]; then
+  git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || die "release $TAG is published but the tag is not here"
+  PUBLISHED=1; echo "release $TAG is already published from HEAD: redoing only the checks, the landing page and older releases"
+fi
+if [ -n "${LP_DIR:-}" ]; then
+  [ -f "$LP_DIR/content.html" ] && [ -d "$LP_DIR/deploy" ] || die "LP_DIR must hold content.html and deploy/"
+  [ -n "${LP_URL:-}" ] || die "set LP_URL in harness/release.local.env"
+  grep -q 'releases/download/mac-v[0-9.]*/' "$LP_DIR/content.html" || die "no download link found in $LP_DIR/content.html"
+fi
 gh auth status >/dev/null 2>&1 || die "gh is not signed in"
 xcrun notarytool history --keychain-profile "${NOTARY_PROFILE:?set NOTARY_PROFILE in harness/release.local.env}" >/dev/null 2>&1 || die "notarytool profile $NOTARY_PROFILE does not work (Apple agreement? keychain?)"
 CUR=$(node -p 'require("./app/package.json").version')
@@ -101,6 +111,7 @@ else
   [ -n "$MRUN" ] && { gh run watch "$MRUN" -R "$REPO" --exit-status --interval 30 >/dev/null || die "the macOS gate on GitHub failed: gh run view $MRUN -R $REPO --log-failed"; }
 fi
 
+if [ $PUBLISHED = 0 ]; then
 say "4. tag and a draft release (published only after both files are up)"
 git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || run git tag "$TAG" "$SHA"
 run git push -q origin "$TAG"   # the tag must exist before 'gh release create' (422 otherwise)
@@ -108,6 +119,7 @@ gh release view "$TAG" -R "$REPO" >/dev/null 2>&1 || run gh release create "$TAG
 
 say "5. Mac: build, notarize the .app, then the DMG, upload"
 if [ $DRY = 1 ]; then echo "(dry-run) APPLE_KEYCHAIN_PROFILE=… npm run dist && app/scripts/notarize.sh $TAG"; else
+  npm run build >/dev/null   # app/lib is copied from dist/: build it from this commit
   (cd app && APPLE_KEYCHAIN_PROFILE="${APPLE_KEYCHAIN_PROFILE:-$NOTARY_PROFILE}" npm run dist)
   NOTARY_PROFILE="$NOTARY_PROFILE" bash app/scripts/notarize.sh "$TAG"
 fi
@@ -119,11 +131,13 @@ if [ $DRY = 1 ]; then echo "(dry-run) download artifact 'installer' from the CI 
   EXE_SHA=$(tr -d '\r\n ' < "$W/sha256.txt" | tr 'A-F' 'a-f')
   [ "$(shasum -a 256 "$W/ElefantRelay-Setup-$VER-x64.exe" | cut -d' ' -f1)" = "$EXE_SHA" ] || die "installer differs from CI's sha256.txt"
   gh release upload "$TAG" "$W/ElefantRelay-Setup-$VER-x64.exe" -R "$REPO" --clobber
+  rm -rf "$W"
 fi
+fi # PUBLISHED
 
 say "7. verify what people download"
 if [ $DRY = 1 ]; then echo "(dry-run) publish the draft (still a pre-release), download both without auth, compare sha256, spctl the DMG, compare app.asar with git"; else
-  gh release edit "$TAG" -R "$REPO" --draft=false --prerelease >/dev/null
+  [ $PUBLISHED = 1 ] || gh release edit "$TAG" -R "$REPO" --draft=false --prerelease >/dev/null
   verify_downloads
 fi
 

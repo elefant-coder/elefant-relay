@@ -1,6 +1,6 @@
 #!/bin/bash
 # The gate: everything that must pass before a commit is called done or a version is released.
-#   harness/check.sh            all steps (≈6 min)
+#   harness/check.sh            all steps (≈6–7 min)
 #   harness/check.sh --quick    typecheck + unit/integration tests only
 # Results: harness/out/<time>/ (summary.md + each step's output). On success, harness/out/last-pass holds the commit.
 set -uo pipefail
