@@ -99,9 +99,11 @@ let lastSig = "";
 // A re-render between mousedown and mouseup swaps the button out and the click is lost; hold polls until the click lands.
 let pressing = false, held = false;
 document.addEventListener("pointerdown", () => { pressing = true; }, true);
-document.addEventListener("pointerup", () => setTimeout(() => { pressing = false; if (held) { held = false; lastSig = ""; refresh(true); } }, 0), true);
+const release = () => { pressing = false; if (held) { held = false; lastSig = ""; refresh(true); } };
+document.addEventListener("pointerup", () => setTimeout(release, 0), true);
+window.addEventListener("blur", release);
 const renderSoon = () => { if (pressing) held = true; else render(); };
-document.addEventListener("pointercancel", () => { pressing = false; }, true);
+document.addEventListener("pointercancel", release, true);
 async function refresh(poll = false) {
   try {
     S = await call("state");
@@ -117,7 +119,7 @@ async function refresh(poll = false) {
   } catch (e) { console.error(e); }
   const sig = JSON.stringify([S, chat]);
   if (poll && sig === lastSig) return;
-  if (poll && pressing) { held = true; return; }
+  if (pressing) { held = true; return; }
   lastSig = sig;
   render();
 }
@@ -266,7 +268,7 @@ function duoBar(peer) {
 
 function overlay() {
   const m = modal;
-  const close = () => { modal = null; render(); };
+  const close = () => { if (modal === m) modal = null; render(); };
   let body;
   if (m.kind === "welcome") {
     const err = h("div", { class: "err" });
