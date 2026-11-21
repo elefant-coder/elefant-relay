@@ -1,7 +1,7 @@
 // Window life (tray, second launch, quit) and taking over from an old 0.1.0 listener.
 // usage: node run-extra.mjs --out DIR [--exe PATH] [--skip-lifecycle]
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -19,8 +19,14 @@ const check = (ok, what) => { console.log(`${ok ? "PASS" : "FAIL"} ${what}`); if
 function app(role, home, extra = {}) {
   const env = { ...process.env, ...extra, E2E_OUT: OUT, ELEFANT_RELAY_HOME: home, ELEFANT_RELAY_APP_DATA: join(OUT, `appdata-${role}`), ELEFANT_RELAY_TEST_DRIVER: join(here, `driver-${role}.mjs`) };
   const [cmd, args] = exe ? [exe, []] : [join(appDir, "node_modules", ".bin", WIN ? "electron.cmd" : "electron"), ["."]];
-  const child = spawn(cmd, args, { cwd: appDir, env, stdio: "ignore", shell: !exe && WIN });
-  return new Promise((r) => { child.on("close", r); setTimeout(() => { child.kill(); r("timeout"); }, 180000); });
+  const child = spawn(cmd, args, { cwd: appDir, env, stdio: ["ignore", "pipe", "pipe"], shell: !exe && WIN });
+  let log = "";
+  child.stdout.on("data", (d) => { log += d; });
+  child.stderr.on("data", (d) => { log += d; });
+  return new Promise((r) => {
+    child.on("close", (c) => { writeFileSync(join(OUT, `${role}.out`), log); r(c); });
+    setTimeout(() => { child.kill(); r("timeout"); }, 180000);
+  });
 }
 
 if (WIN && !process.argv.includes("--skip-lifecycle")) {
