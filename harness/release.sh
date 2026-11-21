@@ -1,0 +1,134 @@
+#!/bin/bash
+# Release the Mac/Windows app. The only way to ship: it refuses unless the gate passed on this exact commit
+# and Windows CI is green for it, and it checks that what people download is what was tested.
+#
+#   harness/release.sh 0.2.3 --notes notes.md --dry-run   check everything, change nothing
+#   harness/release.sh 0.2.3 --notes notes.md             bump → gate → push → CI → tag → release → Mac (notarize) → Windows → verify → LP
+#
+# Local settings (not committed): harness/release.local.env — see harness/release.example.env
+set -euo pipefail
+cd "$(dirname "$0")/.."
+ROOT=$PWD
+VER=${1:?usage: harness/release.sh <version> --notes FILE [--dry-run]}
+shift
+NOTES="" DRY=0
+while [ $# -gt 0 ]; do case $1 in --notes) NOTES=$2; shift 2;; --dry-run) DRY=1; shift;; *) echo "unknown: $1"; exit 2;; esac; done
+[ -f harness/release.local.env ] && source harness/release.local.env
+REPO=${RELEASE_REPO:-elefant-coder/elefant-relay}
+TAG="mac-v$VER"
+say() { printf '\n== %s\n' "$*"; }
+die() { echo "STOP: $*" >&2; exit 1; }
+run() { if [ $DRY = 1 ]; then echo "(dry-run) $*"; else "$@"; fi; }
+
+say "0. preconditions"
+[[ $VER =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "version must look like 0.2.3"
+[ -n "$NOTES" ] && [ -f "$NOTES" ] || die "--notes FILE is required (what changed, in English, for the release page)"
+[ -z "$(git status --porcelain --untracked-files=no)" ] || die "uncommitted changes"
+[ "$(git branch --show-current)" = main ] || die "not on main"
+git fetch -q origin main
+[ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] || [ "$(git merge-base HEAD origin/main)" = "$(git rev-parse origin/main)" ] || die "behind origin/main"
+git rev-parse -q --verify "refs/tags/$TAG" >/dev/null && die "tag $TAG already exists"
+gh release view "$TAG" -R "$REPO" >/dev/null 2>&1 && die "release $TAG already exists"
+gh auth status >/dev/null 2>&1 || die "gh is not signed in"
+xcrun notarytool history --keychain-profile "${NOTARY_PROFILE:?set NOTARY_PROFILE in harness/release.local.env}" >/dev/null 2>&1 || die "notarytool profile $NOTARY_PROFILE does not work (Apple agreement? keychain?)"
+CUR=$(node -p 'require("./app/package.json").version')
+echo "app $CUR → $VER, tag $TAG, repo $REPO"
+
+say "1. bump the version"
+if [ "$CUR" != "$VER" ]; then
+  if [ $DRY = 1 ]; then echo "(dry-run) set app/package.json + lock to $VER and commit"; else
+    node -e 'for (const f of ["app/package.json","app/package-lock.json"]) { const fs=require("fs"); const j=JSON.parse(fs.readFileSync(f)); j.version=process.argv[1]; if (j.packages?.[""]) j.packages[""].version=process.argv[1]; fs.writeFileSync(f, JSON.stringify(j,null,2)+"\n"); }' "$VER"
+    git commit -q -m "app $VER" app/package.json app/package-lock.json
+  fi
+fi
+SHA=$(git rev-parse HEAD)
+
+say "2. the gate on $SHA"
+if [ "$(cut -d' ' -f1 harness/out/last-pass 2>/dev/null)" = "$SHA" ]; then echo "already passed: $(cat harness/out/last-pass)"
+else harness/check.sh || die "the gate failed — fix it first"; fi
+
+say "3. push and wait for Windows CI on $SHA"
+run git push -q origin main
+if [ $DRY = 1 ]; then
+  echo "(dry-run) latest windows run on HEAD: $(gh run list -R "$REPO" -w windows.yml -c "$SHA" -L 1 --json conclusion,databaseId -q '.[0] | "\(.databaseId) \(.conclusion)"' 2>/dev/null || echo none)"
+else
+  for _ in $(seq 60); do RUN=$(gh run list -R "$REPO" -w windows.yml -c "$SHA" -L 1 --json databaseId -q '.[0].databaseId'); [ -n "$RUN" ] && break; sleep 10; done
+  [ -n "${RUN:-}" ] || die "no Windows CI run started for $SHA"
+  if ! gh run watch "$RUN" -R "$REPO" --exit-status --interval 30 >/dev/null; then
+    echo "Windows CI failed once — retrying the failed job (the runner has flaked before: UnknownVizError)"
+    gh run rerun "$RUN" -R "$REPO" --failed; sleep 20
+    gh run watch "$RUN" -R "$REPO" --exit-status --interval 30 >/dev/null || die "Windows CI failed twice: gh run view $RUN -R $REPO --log-failed"
+  fi
+  [ "$(gh run view "$RUN" -R "$REPO" --json headSha -q .headSha)" = "$SHA" ] || die "CI ran a different commit"
+fi
+
+say "4. tag and draft release"
+run git tag "$TAG" "$SHA"
+run git push -q origin "$TAG"   # the tag must exist before 'gh release create' (422 otherwise)
+run gh release create "$TAG" -R "$REPO" --verify-tag --prerelease --title "Elefant Relay app $VER (preview) — Mac / Windows" --notes-file "$NOTES"
+
+say "5. Mac: build, notarize the .app, then the DMG, upload"
+if [ $DRY = 1 ]; then echo "(dry-run) APPLE_KEYCHAIN_PROFILE=… npm run dist && app/scripts/notarize.sh $TAG"; else
+  (cd app && APPLE_KEYCHAIN_PROFILE="${APPLE_KEYCHAIN_PROFILE:-$NOTARY_PROFILE}" npm run dist)
+  NOTARY_PROFILE="$NOTARY_PROFILE" bash app/scripts/notarize.sh "$TAG"
+fi
+
+say "6. Windows: the installer CI built from $SHA"
+if [ $DRY = 1 ]; then echo "(dry-run) download artifact 'installer' from the CI run and upload ElefantRelay-Setup-$VER-x64.exe"; else
+  W=$(mktemp -d); gh run download "$RUN" -R "$REPO" -n installer -D "$W"
+  [ -f "$W/ElefantRelay-Setup-$VER-x64.exe" ] || mv "$W"/*.exe "$W/ElefantRelay-Setup-$VER-x64.exe"
+  gh release upload "$TAG" "$W/ElefantRelay-Setup-$VER-x64.exe" -R "$REPO" --clobber
+fi
+
+say "7. verify what people download"
+if [ $DRY = 1 ]; then echo "(dry-run) download both without auth, compare sha256, spctl the DMG, compare app.asar renderer with git"; else
+  V=$(mktemp -d)
+  for f in "ElefantRelay-$VER-universal.dmg" "ElefantRelay-Setup-$VER-x64.exe"; do
+    curl -sSfL -o "$V/$f" "https://github.com/$REPO/releases/download/$TAG/$f"
+    want=$(gh release view "$TAG" -R "$REPO" --json assets -q ".assets[] | select(.name==\"$f\") | .digest" | sed 's/^sha256://')
+    got=$(shasum -a 256 "$V/$f" | cut -d' ' -f1)
+    [ -z "$want" ] || [ "$want" = "$got" ] || die "$f: sha256 differs from the release"
+    echo "ok $f $got"
+  done
+  xattr -w com.apple.quarantine "0081;$(printf %x "$(date +%s)");Safari;" "$V/ElefantRelay-$VER-universal.dmg"
+  spctl -a -vv -t install "$V/ElefantRelay-$VER-universal.dmg" 2>&1 | grep -q "Notarized Developer ID" || die "DMG is not notarized"
+  M=$(mktemp -d); hdiutil attach -quiet -readonly -nobrowse -mountpoint "$M" "$V/ElefantRelay-$VER-universal.dmg"
+  trap 'hdiutil detach -quiet "$M" 2>/dev/null || true' EXIT
+  xcrun stapler validate "$M/Elefant Relay.app" >/dev/null || die ".app has no notarization ticket"
+  X=$(mktemp -d); "$ROOT/app/node_modules/.bin/asar" extract "$M/Elefant Relay.app/Contents/Resources/app.asar" "$X"
+  for f in renderer/app.js main.mjs chat.mjs preload.cjs; do
+    cmp -s "$X/$f" <(git show "$SHA:app/$f") || die "the DMG's $f is not the tested commit"
+  done
+  echo "ok DMG notarized, stapled, and its app files match $SHA"
+fi
+
+say "8. landing page links → $VER"
+if [ -n "${LP_DIR:-}" ] && [ -f "$LP_DIR/content.html" ]; then
+  OLD=$(grep -o 'releases/download/mac-v[0-9.]*/' "$LP_DIR/content.html" | head -1 | sed 's#releases/download/mac-v##; s#/##')
+  echo "LP points at $OLD"
+  if [ $DRY = 0 ] && [ "$OLD" != "$VER" ]; then
+    cp "$LP_DIR/content.html" "$LP_DIR/content.before-$VER.html"
+    sed -i '' "s#mac-v$OLD/ElefantRelay-$OLD-universal.dmg#$TAG/ElefantRelay-$VER-universal.dmg#g; s#mac-v$OLD/ElefantRelay-Setup-$OLD-x64.exe#$TAG/ElefantRelay-Setup-$VER-x64.exe#g; s#releases/tag/mac-v$OLD#releases/tag/$TAG#g" "$LP_DIR/content.html"
+    grep -q "mac-v$OLD" "$LP_DIR/content.html" && die "LP still mentions $OLD — check $LP_DIR/content.html"
+    cp "$LP_DIR/content.html" "$LP_DIR/deploy/index.html"
+    (cd "$LP_DIR/deploy" && vercel deploy --prod --yes >/dev/null)
+    sleep 15
+    curl -sSf "${LP_URL:?}/?v=$RANDOM" | cmp -s - "$LP_DIR/content.html" || die "the live LP is not the new page yet"
+    for u in $(grep -o "https://github.com/$REPO/releases/download/[^\"]*" "$LP_DIR/content.html" | sort -u); do
+      curl -sfIL "$u" -o /dev/null || die "LP link broken: $u"
+    done
+    echo "ok LP live with $VER links"
+  fi
+else echo "skip: LP_DIR not set"; fi
+
+say "9. point older releases at $VER"
+PREV=$(gh release list -R "$REPO" -L 20 --json tagName -q '.[].tagName' | grep "^mac-v" | grep -vx "$TAG" | head -1)
+if [ -n "$PREV" ] && gh release view "$PREV" -R "$REPO" >/dev/null 2>&1; then
+  if [ $DRY = 1 ]; then echo "(dry-run) prepend a 'newer version: $VER' line to $PREV"; else
+    B=$(mktemp); { printf '> **A newer version is available: [%s](https://github.com/%s/releases/tag/%s)**. Please download that one.\n\n' "$VER" "$REPO" "$TAG"; gh release view "$PREV" -R "$REPO" --json body -q .body | sed '/^> \*\*A newer version/,+1d'; } > "$B"
+    gh release edit "$PREV" -R "$REPO" --notes-file "$B" >/dev/null
+  fi
+fi
+
+say "done"
+echo "Next: run the independent verifier with harness/verify-brief.md (fill in the request and $TAG), then report."
