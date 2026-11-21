@@ -7,3 +7,5 @@ app/release/
 app/lib/
 harness/out/
 harness/release.local.env
+app/e2e-clicks/
+app/e2e-out/

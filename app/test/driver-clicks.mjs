@@ -59,7 +59,7 @@ export default async function ({ js, input }) {
   // C3 "Enter a code" clicked 0–1500 ms after opening, the code arriving ~300 ms late: the first click always works
   await delay(300);
   const lost3 = [];
-  for (let d = 0; d <= 1500; d += 100) {
+  for (let d = 0; d <= 1500; d += 50) {
     await press(js, input, ".add");
     await sleep(d);
     await until(js, exists(".modal .tabs button:nth-of-type(2)"), 5000, "tabs");
@@ -69,7 +69,7 @@ export default async function ({ js, input }) {
     await press(js, input, ".modal .row button.ghost");
     await sleep(1700);
   }
-  check("C3 'Enter a code' right after opening: first click works (16 tries)", lost3.length === 0, `lost at ${JSON.stringify(lost3)} ms`);
+  check("C3 'Enter a code' right after opening: first click works (31 tries)", lost3.length === 0, `lost at ${JSON.stringify(lost3)} ms`);
 
   // C4 a press held while the code arrives (700 ms late) still lands, and the code shows when going back
   await delay(700);
@@ -136,7 +136,7 @@ export default async function ({ js, input }) {
   await until(js, exists("#ta-chat"), 5000, "chat tab");
   await delay(500);
   const lost8 = [];
-  for (let d = 0; d <= 1040; d += 80) {
+  for (let d = 0; d <= 1040; d += 40) {
     await until(js, type("#ta-chat", `note ${d}`), 5000, "type");
     await press(js, input, ".compose button.primary", 40);
     await sleep(d);
@@ -148,7 +148,7 @@ export default async function ({ js, input }) {
     await sleep(400);
   }
   await delay(0);
-  check("C8 a tab clicked right after Send opens on the first click (14 tries)", lost8.length === 0, `lost at ${JSON.stringify(lost8)} ms`);
+  check("C8 a tab clicked right after Send opens on the first click (27 tries)", lost8.length === 0, `lost at ${JSON.stringify(lost8)} ms`);
 
   writeFileSync(out("clicks-result.json"), JSON.stringify(results, null, 1));
   if (results.some((r) => !r.ok)) throw new Error(`${results.filter((r) => !r.ok).length} click checks failed`);

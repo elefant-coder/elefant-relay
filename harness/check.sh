@@ -10,8 +10,10 @@ STAMP=$(date +%Y%m%d-%H%M%S)
 OUT="$ROOT/harness/out/$STAMP"
 mkdir -p "$OUT"
 SHA=$(git rev-parse HEAD)
-DIRTY=$(git status --porcelain --untracked-files=no | wc -l | tr -d ' ')
+DIRTY=$(git status --porcelain | wc -l | tr -d ' ')   # untracked files count: app/renderer/** ships
 QUICK=${1:-}
+# never a real AI: a stand-in claude that records how it was called (the AI-to-AI checks read FAKE_LOG)
+export PATH="$ROOT/app/test/fake:$PATH" FAKE_LOG="$OUT/fake-claude.jsonl"
 fails=0
 { echo "# check $STAMP"; echo; echo "- commit: $SHA$( [ "$DIRTY" != 0 ] && echo " + $DIRTY uncommitted file(s)")"; echo; } > "$OUT/summary.md"
 

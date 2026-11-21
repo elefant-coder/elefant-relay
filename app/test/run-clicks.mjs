@@ -26,7 +26,7 @@ const friendHome = join(OUT, "home-friend");
 mkdirSync(friendHome, { recursive: true });
 const fs = spawnSync(process.execPath, [cli, "setup", "--relay", PROXY, "--name", "friend", "--agent", "command", "--command", agent, "--no-register", "--people", "--no-files"],
   { env: { ...process.env, ELEFANT_RELAY_HOME: friendHome, ELEFANT_RELAY_URL: "" }, encoding: "utf8" });
-if (fs.status !== 0) { console.error(fs.stdout, fs.stderr); process.exit(1); }
+if (fs.status !== 0) { console.error(fs.stdout, fs.stderr); relay.kill(); proxy.close(); process.exit(1); }
 
 const home = join(OUT, "home-taka");
 mkdirSync(home, { recursive: true });
@@ -40,7 +40,7 @@ const child = spawn(cmd, args, { cwd: appDir, env, stdio: ["ignore", "pipe", "pi
 let log = "";
 child.stdout.on("data", (d) => { log += d; });
 child.stderr.on("data", (d) => { log += d; });
-const limit = setTimeout(() => { log += "\nTIMEOUT: killed after 8 minutes\n"; child.kill("SIGKILL"); }, 8 * 60_000);
+const limit = setTimeout(() => { log += "\nTIMEOUT: killed after 12 minutes\n"; child.kill("SIGKILL"); }, 12 * 60_000);
 const code = await new Promise((r) => child.on("close", (c) => r(c)));
 clearTimeout(limit);
 writeFileSync(join(OUT, "app.out"), log);

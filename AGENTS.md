@@ -13,12 +13,14 @@ For AI agents (Claude Code, Codex) and people. Short on purpose: rules here are 
    `app/test/driver-clicks.mjs` (`press` / `mouseDown` / `mouseUp` from `app/test/ui.mjs`); library problems: `test/*.test.ts`.
    `element.click()` cannot lose a click to a redraw — never use it to test clicking.
 2. Fix with the smallest change.
-3. **Gate:** `harness/check.sh` (≈6 min; `--quick` for typecheck + tests while iterating). It must say PASS before you call it done.
+3. **Gate:** `harness/check.sh` (≈7 min; `--quick` for typecheck + tests while iterating). It must say PASS before you call it done.
 4. **Independent verifier** for anything users will download: hand `harness/verify-brief.md` to a fresh agent. Fix what it
    finds, move its reproduction scripts into `app/test/` or `test/`, and add a row to `harness/CASES.md`.
 5. **Release** only with `harness/release.sh <version> --notes FILE` (try `--dry-run` first). It refuses without a gate pass on
-   the exact commit and green Windows CI, tags before creating the release, notarizes, uploads, checks the downloads match the
-   commit, moves the landing page links, and points older releases at the new one.
+   the exact commit (no uncommitted or untracked files) and green CI (Windows build + macOS gate), tags before creating the
+   release, keeps it a draft until both files are up, notarizes, checks that the downloads match the commit (app files, lib/,
+   the EXE CI built), moves the landing page links, and points every older release at the new one. If it stops part-way, fix
+   the cause and run the same command again: it resumes. `harness/release.sh --verify <version>` re-checks a published release.
 
 ## Rules
 - Tests live in the repo. Never leave a check only in /tmp — it is gone the next day.
