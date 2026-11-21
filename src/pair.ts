@@ -117,7 +117,11 @@ export async function finishInvites(me: Identity, cfg: Config): Promise<Paired[]
       if (isCard(c)) answered.push({ c, use: inv.use ?? "people", code: inv.code });
     } catch { /* wrong code or garbage: drop the invite */ }
   }
-  writeJson(p("invites.json"), keep);
+  // createInvite may have added a code while we waited on the relay: re-read and drop only what we checked and let go
+  const checked = new Set(list.map((i) => i.code));
+  const kept = new Set(keep.map((i) => i.code));
+  const now = readJson<OpenInvite[]>(p("invites.json"), []);
+  writeJson(p("invites.json"), now.filter((i) => (!checked.has(i.code) || kept.has(i.code)) && Date.now() - i.created <= INVITE_TTL));
   const added: Paired[] = [];
   for (const { c, use, code } of answered) {
     // my "my computers" folder is shared only if the joiner also chose own-device pairing (and so echoed my folder id)

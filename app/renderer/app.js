@@ -96,6 +96,12 @@ async function call(name, arg) {
 }
 
 let lastSig = "";
+// A re-render between mousedown and mouseup swaps the button out and the click is lost; hold polls until the click lands.
+let pressing = false, held = false;
+document.addEventListener("pointerdown", () => { pressing = true; }, true);
+document.addEventListener("pointerup", () => setTimeout(() => { pressing = false; if (held) { held = false; lastSig = ""; refresh(true); } }, 0), true);
+const renderSoon = () => { if (pressing) held = true; else render(); };
+document.addEventListener("pointercancel", () => { pressing = false; }, true);
 async function refresh(poll = false) {
   try {
     S = await call("state");
@@ -109,8 +115,9 @@ async function refresh(poll = false) {
       cur = p.name;
     }
   } catch (e) { console.error(e); }
-  const sig = JSON.stringify([S, chat, modal?.kind]);
+  const sig = JSON.stringify([S, chat]);
   if (poll && sig === lastSig) return;
+  if (poll && pressing) { held = true; return; }
   lastSig = sig;
   render();
 }
@@ -295,8 +302,8 @@ function overlay() {
     if (m.tab === "make") {
       if (!m.invite && !m.loading && !m.error) {
         m.loading = true;
-        call("invite").then((r) => { if (modal !== m) return; m.loading = false; m.invite = r.code; m.before = S.peers.length; render(); })
-          .catch((e) => { m.loading = false; m.error = e.message; render(); });
+        call("invite").then((r) => { if (modal !== m) return; m.loading = false; m.invite = r.code; m.before = S.peers.length; renderSoon(); })
+          .catch((e) => { m.loading = false; m.error = e.message; renderSoon(); });
       }
       if (m.invite) {
         const copyBtn = h("button", { onclick: async () => { await call("copy", { text: m.invite }); copyBtn.textContent = L.copied; } }, L.copy);
