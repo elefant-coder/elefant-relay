@@ -21,7 +21,9 @@ function fixPath() {
       fromShell = out.match(/__P__(.*)__P__/s)?.[1] ?? "";
     } catch { /* fall back to the usual places */ }
   }
-  const parts = [...fromShell.split(delimiter), ...(process.env.PATH ?? "").split(delimiter), ...extra].filter(Boolean);
+  const own = (process.env.PATH ?? "").split(delimiter);
+  // tests put a stand-in claude first on PATH; the login shell must not push the real one ahead of it
+  const parts = (process.env.ELEFANT_RELAY_TEST_DRIVER ? [...own, ...fromShell.split(delimiter)] : [...fromShell.split(delimiter), ...own]).concat(extra).filter(Boolean);
   process.env.PATH = [...new Set(parts)].join(delimiter);
 }
 fixPath();
