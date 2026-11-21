@@ -17,7 +17,8 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      - run: cd app && npm ci
+      - name: app deps, and fetch the Electron binary now (two apps downloading it at once on first launch hung the run)
+        run: cd app && npm ci && npx electron --version
       - name: harness/check.sh (a fake claude on PATH — the runner has no AI app, and the app won't start without one)
         run: |
           export PATH="$PWD/app/test/fake:$PATH" FAKE_LOG="$RUNNER_TEMP/fake-claude.jsonl"

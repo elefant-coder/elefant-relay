@@ -36,7 +36,8 @@ function launch(role, extraEnv) {
   let log = "";
   child.stdout.on("data", (d) => { log += d; });
   child.stderr.on("data", (d) => { log += d; });
-  return new Promise((r) => child.on("close", (code) => { writeFileSync(join(OUT, `${role}.out`), log); r(code); }));
+  const limit = setTimeout(() => { log += "\nTIMEOUT: killed after 12 minutes\n"; child.kill("SIGKILL"); }, 12 * 60_000);
+  return new Promise((r) => child.on("close", (code) => { clearTimeout(limit); writeFileSync(join(OUT, `${role}.out`), log); r(code); }));
 }
 
 const a = launch("inviter", { E2E_RELAY: `http://127.0.0.1:${port}`, E2E_NAME: "taka", E2E_DUO: "1", E2E_EXPECT_CARD: "1", E2E_WAIT_FILE: join(OUT, "joiner-done") });
