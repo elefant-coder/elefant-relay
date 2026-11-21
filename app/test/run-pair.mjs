@@ -62,8 +62,10 @@ if (process.env.FAKE_LOG) {
   const job = list.find((v) => v.includes("--permission-mode"));
   check(Boolean(duo) && duo[duo.indexOf("--tools") + 1] === "" && duo[duo.indexOf("--setting-sources") + 1] === "", "AI-to-AI: claude got the empty --tools and --setting-sources values");
   check(Boolean(duo) && duo[duo.indexOf("--system-prompt") + 1].startsWith("You write short messages on behalf of a user"), "AI-to-AI: the system prompt arrived in one piece");
-  check(Boolean(job) && job[job.indexOf("--tools") + 1] === "Read,Grep,Glob,WebSearch,WebFetch", "friend's request: claude ran with read-only tools");
-  check(Boolean(job) && job.some((x) => /^Read\(\/\/.+\*\*\)$/.test(x)), "friend's request: the rule blocking the key folder was passed");
+  if (!echo) { // with --echo, friends' requests go to the echo agent, not claude
+    check(Boolean(job) && job[job.indexOf("--tools") + 1] === "Read,Grep,Glob,WebSearch,WebFetch", "friend's request: claude ran with read-only tools");
+    check(Boolean(job) && job.some((x) => /^Read\(\/\/.+\*\*\)$/.test(x)), "friend's request: the rule blocking the key folder was passed");
+  }
   writeFileSync(join(OUT, "fake-claude-calls.json"), JSON.stringify(list, null, 1));
 }
 writeFileSync(join(OUT, "result.txt"), fails.length ? `FAIL\n${fails.join("\n")}` : "PASS");
