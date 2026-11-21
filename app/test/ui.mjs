@@ -56,3 +56,25 @@ export async function checkLayout(js, who) {
   writeFileSync(out(`${who}-layout.txt`), p || "ok");
   if (p) throw new Error(`layout: ${p}`);
 }
+
+// ---- real mouse (main.input = webContents.sendInputEvent) ----
+/** centre of the first element matching sel, or null */
+export const centre = (js, sel) => js(`(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return null; const b = e.getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2) }; })()`);
+export async function mouseDown(js, input, sel) {
+  const p = await centre(js, sel);
+  if (!p) throw new Error(`not on screen: ${sel}`);
+  input({ type: "mouseMove", x: p.x, y: p.y });
+  input({ type: "mouseDown", x: p.x, y: p.y, button: "left", clickCount: 1 });
+  return p;
+}
+export const mouseUp = (input, p) => input({ type: "mouseUp", x: p.x, y: p.y, button: "left", clickCount: 1 });
+/** press and release like a person (hold = ms between down and up) */
+export async function press(js, input, sel, hold = 80) {
+  const p = await mouseDown(js, input, sel);
+  await sleep(hold);
+  mouseUp(input, p);
+  await sleep(30);
+}
+/** count full-screen redraws (render() replaces #app's children) */
+export const watchRedraws = `(() => { if (window.__redraws) return true; window.__redraws = []; new MutationObserver((rs) => { if (rs.some((r) => r.removedNodes.length)) window.__redraws.push(Date.now()); }).observe(document.getElementById("app"), { childList: true }); return true; })()`;
+export const redrawsSince = (t) => `window.__redraws.filter((x) => x > ${t}).length`;

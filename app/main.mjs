@@ -228,8 +228,10 @@ app.whenReady().then(() => {
         tray: () => ({ exists: Boolean(tray && !tray.isDestroyed()), empty: trayImage ? trayImage.isEmpty() : true }),
         trayQuit: quitApp,
         execPath: process.execPath,
+        // real mouse/keyboard events (unlike element.click(), these are lost if the page redraws mid-press)
+        input: (ev) => win?.webContents.sendInputEvent(ev),
       };
-      try { await drive({ js: (src) => win.webContents.executeJavaScript(src), shot, main }); } catch (e) { console.error("DRIVER FAILED:", e); code = 1; }
+      try { await drive({ js: (src) => win.webContents.executeJavaScript(src), shot, main, input: main.input }); } catch (e) { console.error("DRIVER FAILED:", e); code = 1; }
       rx?.close(); rx = null;
       quitting = true;
       app.exit(code);
