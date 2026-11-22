@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, request, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { startLocalRelay } from "./localRelay.js";
 import { newIdentity, pairSlot } from "../src/crypto.js";
 
 // What went wrong (0.1.0 → fixed in 0.2.2): finishInvites wrote back the invite list it read before waiting
@@ -14,7 +14,7 @@ const root = resolve(import.meta.dirname, "..", "..");
 const cli = join(root, "dist", "src", "cli.js");
 
 /** a proxy that makes GET (the answer check) slow and everything else fast */
-function slowGets(target: string, port: number, ms: number): Promise<Server> {
+function slowGets(target: string, ms: number): Promise<{ srv: Server; url: string }> {
   const srv = createServer((req, res) => {
     const chunks: Buffer[] = [];
     req.on("data", (d: Buffer) => chunks.push(d));
@@ -28,15 +28,15 @@ function slowGets(target: string, port: number, ms: number): Promise<Server> {
       up.end(Buffer.concat(chunks));
     }, req.method === "GET" ? ms : 0));
   });
-  return new Promise((r) => srv.listen(port, "127.0.0.1", () => r(srv)));
+  return new Promise((r) => srv.listen(0, "127.0.0.1", () => {
+    const a = srv.address();
+    r({ srv, url: `http://127.0.0.1:${typeof a === "object" && a ? a.port : 0}` });
+  }));
 }
 
 test("invites: a code made while the answer check waits on the relay is kept; answered, expired and broken ones are dropped", async () => {
-  const port = 30000 + Math.floor(Math.random() * 10000);
-  const rp = spawn(process.execPath, [cli, "relay", "local", "--port", String(port)], { stdio: ["ignore", "pipe", "ignore"] });
-  await new Promise<void>((r) => rp.stdout!.on("data", (d: Buffer) => { if (d.toString().includes("listening")) r(); }));
-  const proxy = await slowGets(`http://127.0.0.1:${port}`, port + 1, 600);
-  const url = `http://127.0.0.1:${port + 1}`;
+  const { proc: rp, url: relayUrl } = await startLocalRelay(cli);
+  const { srv: proxy, url } = await slowGets(relayUrl, 600);
   try {
     const home = mkdtempSync(join(tmpdir(), "elefant-relay-inv-"));
     process.env.ELEFANT_RELAY_HOME = home;

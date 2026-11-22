@@ -17,6 +17,7 @@ old code at a few points (record which), so keep the steps fine (prove it: see "
 | 9 | 0.1.0 | requests never picked up | a listener from an older setup kept the old mailbox | test/listener.test.ts | — |
 | 10 | 0.2.0 (dev) | long chats pushed the input box off the window | the page grew instead of the message list | run-pair `checkLayout` | — |
 | 11 | 0.2.0 (dev) | AI-to-AI answered with the user's private notes | the tool-less AI still loaded CLAUDE.md / memory | run-pair FAKE_LOG checks (Windows CI) | — |
+| 12 | (tests) | the gate stopped on a test "cancelled" (0.2.3 release run) | tests started the local relay on a random port and waited for "listening" forever if it could not start | test/localRelay.ts (port 0, fails with the relay's output) | — |
 
 ## Known gaps (no check yet)
 - Windows timing: the click checks run on macOS only (locally and in .github/workflows/check.yml); Windows CI runs run-pair/run-extra.

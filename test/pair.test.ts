@@ -1,19 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { startLocalRelay } from "./localRelay.js";
 import { newIdentity, pairSeal, pairOpen, pairSlot } from "../src/crypto.js";
 
 const root = resolve(import.meta.dirname, "..", "..");
 const cli = join(root, "dist", "src", "cli.js");
 
 test("review fix: a relay owner who learns the code cannot swap only the encryption key", async () => {
-  const port = 40000 + Math.floor(Math.random() * 10000);
-  const rp = spawn(process.execPath, [cli, "relay", "local", "--port", String(port)], { stdio: ["ignore", "pipe", "ignore"] });
-  await new Promise<void>((r) => rp.stdout!.on("data", (d: Buffer) => { if (d.toString().includes("listening")) r(); }));
-  const url = `http://127.0.0.1:${port}`;
+  const { proc: rp, url } = await startLocalRelay(cli);
   try {
     process.env.ELEFANT_RELAY_HOME = mkdtempSync(join(tmpdir(), "elefant-relay-pt-"));
     const { createInvite, joinInvite } = await import("../src/pair.js");

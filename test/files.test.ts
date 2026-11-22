@@ -5,6 +5,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { startLocalRelay } from "./localRelay.js";
 
 // Two throwaway Syncthing instances on loopback (no discovery, no relays, no NAT).
 // They never touch the Syncthing that may already run on this machine (GUI 8384 / port 22000).
@@ -92,11 +93,9 @@ function pair(A: string, B: string, stA: St, stB: St): void {
 
 before(async () => {
   if (!hasSyncthing) return;
-  const p = port();
-  const rp = spawn(process.execPath, [cli, "relay", "local", "--port", String(p)], { stdio: ["ignore", "pipe", "ignore"] });
+  const { proc: rp, url } = await startLocalRelay(cli);
   procs.push(rp);
-  await new Promise<void>((res) => rp.stdout!.on("data", (d: Buffer) => { if (d.toString().includes("listening")) res(); }));
-  relay.url = `http://127.0.0.1:${p}`;
+  relay.url = url;
   sts.push(await startSyncthing(), await startSyncthing());
 });
 

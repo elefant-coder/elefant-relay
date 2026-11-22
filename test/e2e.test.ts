@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { startLocalRelay } from "./localRelay.js";
 import { newIdentity, boxId, seal, boxAuth } from "../src/crypto.js";
 
 const root = resolve(import.meta.dirname, "..", "..");
@@ -36,11 +37,9 @@ const startDaemon = (home: string): ChildProcess => {
 before(async () => {
   if (process.env.ELEFANT_RELAY_TEST_RELAY) relay.url = process.env.ELEFANT_RELAY_TEST_RELAY;
   else {
-  const port = 20000 + Math.floor(Math.random() * 20000);
-  const rp = spawn(process.execPath, [cli, "relay", "local", "--port", String(port)], { stdio: ["ignore", "pipe", "pipe"] });
+  const { proc: rp, url } = await startLocalRelay(cli);
   procs.push(rp);
-  await new Promise<void>((res) => rp.stdout!.on("data", (d: Buffer) => { if (d.toString().includes("listening")) res(); }));
-  relay.url = `http://127.0.0.1:${port}`;
+  relay.url = url;
   }
   for (const [home, name] of [[A, "alice"], [B, "bob"]] as const) {
     const r = run(home, "setup", "--relay", relay.url, "--name", name, "--agent", "command", "--command", agent, "--no-register");

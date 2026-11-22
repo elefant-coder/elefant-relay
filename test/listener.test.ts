@@ -4,6 +4,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { startLocalRelay } from "./localRelay.js";
 
 // What went wrong on 2026-11-19: a listener started from an older setup kept listening on the old
 // mailbox, so a friend's request was never picked up and nobody could see why.
@@ -44,11 +45,9 @@ const codeOf = (out: string): string => {
 
 before(async () => {
   for (let i = 0; i < 2; i++) {
-    const port = 20000 + Math.floor(Math.random() * 20000);
-    const rp = spawn(process.execPath, [cli, "relay", "local", "--port", String(port)], { stdio: ["ignore", "pipe", "pipe"] });
+    const { proc: rp, url } = await startLocalRelay(cli);
     procs.push(rp);
-    await new Promise<void>((res) => rp.stdout!.on("data", (d: Buffer) => { if (d.toString().includes("listening")) res(); }));
-    relays.push(`http://127.0.0.1:${port}`);
+    relays.push(url);
   }
 });
 
