@@ -32,6 +32,7 @@ if [ "$QUICK" != "--quick" ]; then
   step app-lib bash -c "cd app && npm run --silent lib"
   step pair node app/test/run-pair.mjs --out "$OUT/pair" --echo --connect
   step clicks node app/test/run-clicks.mjs --out "$OUT/clicks"
+  step allow node app/test/run-verify.mjs --out "$OUT/allow"
 fi
 
 echo | tee -a "$OUT/summary.md" >/dev/null

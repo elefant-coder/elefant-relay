@@ -33,5 +33,7 @@ jobs:
             harness/out/*/clicks/checks.jsonl
             harness/out/*/clicks/app.out
             harness/out/*/clicks/driver.log
+            harness/out/*/allow/checks.jsonl
+            harness/out/*/allow/app.out
             harness/out/*/pair/*.png
             harness/out/*/pair/*.out

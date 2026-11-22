@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startProxy } from "./proxy.mjs";
+import { startLocalRelay, freePort } from "./relay.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appDir = resolve(here, "..");
@@ -16,11 +17,10 @@ const cli = join(repo, "dist", "src", "cli.js");
 const agent = `"${process.execPath}" "${join(repo, "test", "fixtures", "echo-agent.mjs")}"`;
 mkdirSync(OUT, { recursive: true });
 
-const port = 29000 + Math.floor(Math.random() * 1000);
-const relay = spawn(process.execPath, [cli, "relay", "local", "--port", String(port)], { stdio: ["ignore", "pipe", "ignore"] });
-await new Promise((r) => relay.stdout.on("data", (d) => { if (String(d).includes("listening")) r(); }));
-const proxy = await startProxy(`http://127.0.0.1:${port}`, port + 1000);
-const PROXY = `http://127.0.0.1:${port + 1000}`;
+const { proc: relay, url: relayUrl } = await startLocalRelay(cli);
+const pport = await freePort();
+const proxy = await startProxy(relayUrl, pport);
+const PROXY = `http://127.0.0.1:${pport}`;
 
 const friendHome = join(OUT, "home-friend");
 mkdirSync(friendHome, { recursive: true });

@@ -18,6 +18,7 @@ old code at a few points (record which), so keep the steps fine (prove it: see "
 | 10 | 0.2.0 (dev) | long chats pushed the input box off the window | the page grew instead of the message list | run-pair `checkLayout` | — |
 | 11 | 0.2.0 (dev) | AI-to-AI answered with the user's private notes | the tool-less AI still loaded CLAUDE.md / memory | run-pair FAKE_LOG checks (Windows CI) | — |
 | 12 | (tests) | the gate stopped on a test "cancelled" (0.2.3 release run) | tests started the local relay on a random port and waited for "listening" forever if it could not start | test/localRelay.ts (port 0, fails with the relay's output) | — |
+| 13 | 0.2.2–0.2.3 | a double-click on "Allow once" with two requests waiting allowed both | the 2nd click landed on the next card, which moved under the pointer; cards were in random-id order, so a new one could also appear above | allow V3 (app/test/run-verify.mjs), test/unit.test.ts "oldest first" | f490de0: V3 FAIL (both allowed at 90/250 ms); unit "oldest first" FAIL with the old state.ts |
 
 ## Known gaps (no check yet)
 - Windows timing: the click checks run on macOS only (locally and in .github/workflows/check.yml); Windows CI runs run-pair/run-extra.

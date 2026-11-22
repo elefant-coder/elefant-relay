@@ -10,7 +10,8 @@ For AI agents (Claude Code, Codex) and people. Short on purpose: rules here are 
 
 ## The loop for any change
 1. **Reproduce first.** Write the check that shows the problem (it must fail now). UI problems: a real-mouse check in
-   `app/test/driver-clicks.mjs` (`press` / `mouseDown` / `mouseUp` from `app/test/ui.mjs`); library problems: `test/*.test.ts`.
+   `app/test/driver-clicks.mjs` or, around Allow / Join, `app/test/driver-verify.mjs` (`press` / `mouseDown` / `mouseUp` from
+   `app/test/ui.mjs`); library problems: `test/*.test.ts`.
    `element.click()` cannot lose a click to a redraw — never use it to test clicking.
 2. Fix with the smallest change.
 3. **Gate:** `harness/check.sh` (≈7 min; `--quick` for typecheck + tests while iterating). It must say PASS before you call it done.

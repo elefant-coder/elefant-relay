@@ -184,14 +184,15 @@ function banners() {
       h("p", {}, h("b", {}, L.ask(x.peer, x.mode))),
       h("div", { class: "req" }, x.text.split("\n---\n")[0]),
       h("div", { class: "row" },
-        h("button", { class: "primary", onclick: () => decide(x.id, "once") }, L.once),
-        h("button", { onclick: () => decide(x.id, "always") }, L.always),
-        h("button", { class: "danger", onclick: () => decide(x.id, "deny") }, L.deny))));
+        h("button", { class: "primary", onclick: (e) => decide(e, x.id, "once") }, L.once),
+        h("button", { onclick: (e) => decide(e, x.id, "always") }, L.always),
+        h("button", { class: "danger", onclick: (e) => decide(e, x.id, "deny") }, L.deny))));
   }
   return out;
 }
 
-async function decide(id, decision) { await call("decide", { id, decision }); refresh(); }
+// The 2nd click of a double-click lands on whatever card moved under the pointer: never let it answer a request.
+async function decide(e, id, decision) { if (e.detail > 1) return; await call("decide", { id, decision }); refresh(); }
 
 function main() {
   const peer = S.peers.find((p) => p.name === cur);

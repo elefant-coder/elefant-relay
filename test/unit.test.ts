@@ -99,3 +99,17 @@ test("review fix: Codex jobs switch elefant-relay off only when it is registered
   assert.equal(codexHasRelay(), true);
   delete process.env.CODEX_HOME;
 });
+
+test("pending requests are listed oldest first, so a new one never lands above the card being answered", async () => {
+  const { savePending, listPending, removePending } = await import("../src/state.js");
+  const base = { taskId: "t", peer: "p", mode: "read" as const, text: "x", replyTo: "p" };
+  // ids sort the opposite way from arrival, as random ids can
+  savePending({ ...base, id: "zzz", received: "2026-11-22T00:00:01.000Z" });
+  savePending({ ...base, id: "aaa", received: "2026-11-22T00:00:02.000Z" });
+  try {
+    assert.deepEqual(listPending().map((x) => x.id), ["zzz", "aaa"]);
+  } finally {
+    removePending("zzz");
+    removePending("aaa");
+  }
+});

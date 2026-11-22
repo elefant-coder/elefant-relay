@@ -6,6 +6,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { startLocalRelay } from "./relay.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appDir = resolve(here, "..");
@@ -15,11 +16,9 @@ const OUT = resolve(arg("--out") ?? join(appDir, "e2e-out"));
 const exe = arg("--exe");
 const echo = process.argv.includes("--echo");
 const viaConnect = process.argv.includes("--connect");
-const port = 28000 + Math.floor(Math.random() * 1000);
 mkdirSync(OUT, { recursive: true });
 
-const relay = spawn(process.execPath, [join(repo, "dist", "src", "cli.js"), "relay", "local", "--port", String(port)], { stdio: "ignore" });
-await new Promise((r) => setTimeout(r, 2000));
+const { proc: relay, url: relayUrl } = await startLocalRelay(join(repo, "dist", "src", "cli.js"));
 
 function launch(role, extraEnv) {
   const home = join(OUT, `home-${role}`);
@@ -42,9 +41,9 @@ function launch(role, extraEnv) {
   return new Promise((r) => child.on("close", (code) => { clearTimeout(limit); writeFileSync(join(OUT, `${role}.out`), log); r(code); }));
 }
 
-const a = launch("inviter", { E2E_RELAY: `http://127.0.0.1:${port}`, E2E_NAME: "taka", E2E_DUO: "1", E2E_EXPECT_CARD: "1", E2E_WAIT_FILE: join(OUT, "joiner-done") });
+const a = launch("inviter", { E2E_RELAY: relayUrl, E2E_NAME: "taka", E2E_DUO: "1", E2E_EXPECT_CARD: "1", E2E_WAIT_FILE: join(OUT, "joiner-done") });
 await new Promise((r) => setTimeout(r, 3000));
-const c = launch("joiner", { E2E_NAME: "friend", E2E_SEND: "1", E2E_WAIT_FILE: join(OUT, "inviter-done"), ...(viaConnect ? { E2E_VIA_CONNECT: "1", E2E_RELAY: `http://127.0.0.1:${port}` } : {}) });
+const c = launch("joiner", { E2E_NAME: "friend", E2E_SEND: "1", E2E_WAIT_FILE: join(OUT, "inviter-done"), ...(viaConnect ? { E2E_VIA_CONNECT: "1", E2E_RELAY: relayUrl } : {}) });
 const [ca, cc] = await Promise.all([a, c]);
 relay.kill();
 

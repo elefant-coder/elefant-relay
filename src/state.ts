@@ -144,7 +144,9 @@ export function listPending(): Pending[] {
   if (!existsSync(dir)) return [];
   return readdirSync(dir).filter((f) => f.endsWith(".json"))
     .map((f) => readJson<Pending | null>(p("pending", f), null))
-    .filter((x): x is Pending => x !== null && x.decision === undefined);
+    .filter((x): x is Pending => x !== null && x.decision === undefined)
+    // oldest first, so a request that arrives later lands below the one being answered, not under the pointer
+    .sort((a, b) => a.received.localeCompare(b.received) || a.id.localeCompare(b.id));
 }
 export const savePending = (x: Pending): void => writeJson(pendingFile(x.id), x);
 export const loadPending = (id: string): Pending | null => readJson<Pending | null>(pendingFile(id), null);
